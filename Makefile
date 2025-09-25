@@ -1,11 +1,11 @@
-# Makefile for tplkit
+# Makefile for cs
 
 # Variables
-BINARY_NAME=tplkit
-MODULE_NAME=tplkit
+BINARY_NAME=cs
+MODULE_NAME=cs
 BUILD_DIR=.
 INSTALL_DIR=/usr/local/bin
-CONFIG_DIR=$(HOME)/.config/tplkit
+CONFIG_DIR=$(HOME)/.config/cs
 
 # Go build flags
 GOOS=$(shell go env GOOS)
@@ -104,7 +104,7 @@ build-all:
 .PHONY: dev
 dev: build
 	@echo "Running $(BINARY_NAME) with local config..."
-	./$(BINARY_NAME) --config ./tplkit.yaml
+	./$(BINARY_NAME) --config ./cs.yaml
 
 # Show help
 .PHONY: help

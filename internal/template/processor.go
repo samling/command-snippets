@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"tplkit/internal/models"
+	"cs/internal/models"
 
 	"github.com/AlecAivazis/survey/v2"
 )
@@ -74,7 +74,7 @@ func (p *Processor) ExecuteWithMode(snippet *models.Snippet, mode ExecutionMode)
 	switch mode {
 	case PrintOnly:
 		// Print just the raw command (perfect for piping)
-		fmt.Println(command)
+		fmt.Print(command)
 		return nil
 
 	case AutoExecute:

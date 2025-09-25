@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"tplkit/cmd"
+	"cs/cmd"
 )
 
 func main() {

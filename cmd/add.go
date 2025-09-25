@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"tplkit/internal/models"
+	"cs/internal/models"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
@@ -22,7 +22,7 @@ All variables must be explicitly defined in the template. You can use:
 - Transform templates for reusable transformation logic
 
 Examples:
-  tplkit add                         # Interactive template creation`,
+  cs add                         # Interactive template creation`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAdd()
 		},

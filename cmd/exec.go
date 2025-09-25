@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"tplkit/internal/template"
+	"cs/internal/template"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
@@ -26,9 +26,9 @@ By default, the command will be printed for copying/piping. Use flags to change 
 If no template name is provided, you'll be prompted to select from available templates.
 
 Examples:
-  tplkit exec kubectl-get-pods              # Print command only (default)
-  tplkit exec kubectl-get-pods --run        # Execute automatically
-  tplkit exec kubectl-get-pods --prompt     # Prompt before executing`,
+  cs exec kubectl-get-pods              # Print command only (default)
+  cs exec kubectl-get-pods --run        # Execute automatically
+  cs exec kubectl-get-pods --prompt     # Prompt before executing`,
 		RunE: runExec,
 	}
 

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tplkit/internal/models"
+	"cs/internal/models"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -20,9 +20,9 @@ var (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "tplkit",
-	Short: "Advanced command template toolkit with intelligent variable substitution",
-	Long: `TplKit is a powerful CLI tool for managing command templates with advanced variable substitution.
+	Use:   "cs",
+	Short: "Command Snippets - Advanced command template toolkit with intelligent variable substitution",
+	Long: `CS (Command Snippets) is a powerful CLI tool for managing command templates with advanced variable substitution.
 
 Features:
 - Intelligent template-based variable transformation
@@ -38,7 +38,7 @@ Features:
 			if err != nil {
 				return fmt.Errorf("failed to marshal config: %w", err)
 			}
-			fmt.Print("# TplKit Configuration\n# Generated default configuration\n\n")
+			fmt.Print("# CS (Command Snippets) Configuration\n# Generated default configuration\n\n")
 			fmt.Print(string(data))
 			return nil
 		}
@@ -56,7 +56,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/tplkit/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/cs/config.yaml)")
 	rootCmd.Flags().BoolVar(&generateConfig, "generate-config", false, "generate default config to stdout")
 
 	// Add subcommands
@@ -77,7 +77,7 @@ func initConfig() {
 		cobra.CheckErr(err)
 
 		// Search config in home directory with name "config"
-		cfgFile = filepath.Join(home, ".config", "tplkit", "config.yaml")
+		cfgFile = filepath.Join(home, ".config", "cs", "config.yaml")
 	}
 
 	// Load configuration
@@ -115,49 +115,49 @@ func loadConfig(filename string) (*models.Config, error) {
 		cfg.Snippets = make(map[string]models.Snippet)
 	}
 
-	// Load additional snippet files if specified
-	if err := loadAdditionalSnippets(&cfg, filename); err != nil {
-		return nil, fmt.Errorf("loading additional snippets: %w", err)
+	// Load additional configuration files if specified
+	if err := loadAdditionalConfigs(&cfg, filename); err != nil {
+		return nil, fmt.Errorf("loading additional configs: %w", err)
 	}
 
 	return &cfg, nil
 }
 
-// loadAdditionalSnippets loads and merges additional snippet files
-func loadAdditionalSnippets(cfg *models.Config, configDir string) error {
+// loadAdditionalConfigs loads and merges additional configuration files
+func loadAdditionalConfigs(cfg *models.Config, configDir string) error {
 	baseDir := filepath.Dir(configDir)
 
-	// Load additional snippet files
-	for _, additionalPath := range cfg.Settings.AdditionalSnippets {
-		snippetPath := expandPath(additionalPath)
-		if !filepath.IsAbs(snippetPath) {
-			snippetPath = filepath.Join(baseDir, snippetPath)
+	// Load additional configuration files
+	for _, additionalPath := range cfg.Settings.AdditionalConfigs {
+		configPath := expandPath(additionalPath)
+		if !filepath.IsAbs(configPath) {
+			configPath = filepath.Join(baseDir, configPath)
 		}
 
 		// Expand glob patterns
-		matches, err := filepath.Glob(snippetPath)
+		matches, err := filepath.Glob(configPath)
 		if err != nil {
-			return fmt.Errorf("invalid glob pattern %s: %w", snippetPath, err)
+			return fmt.Errorf("invalid glob pattern %s: %w", configPath, err)
 		}
 
 		if len(matches) == 0 {
 			// If no matches found, treat as a literal path and check if it exists
-			if err := loadSnippetFile(cfg, snippetPath); err != nil {
+			if err := loadConfigFile(cfg, configPath); err != nil {
 				if os.IsNotExist(err) {
-					fmt.Printf("Warning: Additional snippet file not found: %s\n", snippetPath)
+					fmt.Printf("Warning: Additional config file not found: %s\n", configPath)
 					continue
 				}
-				return fmt.Errorf("loading additional snippet file %s: %w", snippetPath, err)
+				return fmt.Errorf("loading additional config file %s: %w", configPath, err)
 			}
 		} else {
 			// Process all matched files
 			for _, matchedFile := range matches {
-				if err := loadSnippetFile(cfg, matchedFile); err != nil {
+				if err := loadConfigFile(cfg, matchedFile); err != nil {
 					if os.IsNotExist(err) {
-						fmt.Printf("Warning: Additional snippet file not found: %s\n", matchedFile)
+						fmt.Printf("Warning: Additional config file not found: %s\n", matchedFile)
 						continue
 					}
-					return fmt.Errorf("loading additional snippet file %s: %w", matchedFile, err)
+					return fmt.Errorf("loading additional config file %s: %w", matchedFile, err)
 				}
 			}
 		}
@@ -166,20 +166,47 @@ func loadAdditionalSnippets(cfg *models.Config, configDir string) error {
 	return nil
 }
 
-// loadSnippetFile loads a snippet file and merges it into the config
-func loadSnippetFile(cfg *models.Config, filename string) error {
+// loadConfigFile loads a config file and merges it into the main config
+func loadConfigFile(cfg *models.Config, filename string) error {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}
 
-	var snippetFile models.SnippetsFile
-	if err := yaml.Unmarshal(data, &snippetFile); err != nil {
+	var additionalConfig models.Config
+	if err := yaml.Unmarshal(data, &additionalConfig); err != nil {
 		return err
 	}
 
-	// Merge snippets into main config
-	for name, snippet := range snippetFile.Snippets {
+	// Initialize maps if they don't exist in the main config
+	if cfg.TransformTemplates == nil {
+		cfg.TransformTemplates = make(map[string]models.TransformTemplate)
+	}
+	if cfg.VariableTypes == nil {
+		cfg.VariableTypes = make(map[string]models.VariableType)
+	}
+	if cfg.Snippets == nil {
+		cfg.Snippets = make(map[string]models.Snippet)
+	}
+
+	// Merge transform templates
+	for name, template := range additionalConfig.TransformTemplates {
+		if _, exists := cfg.TransformTemplates[name]; exists {
+			fmt.Printf("Warning: Transform template '%s' from %s overwrites existing template\n", name, filename)
+		}
+		cfg.TransformTemplates[name] = template
+	}
+
+	// Merge variable types
+	for name, varType := range additionalConfig.VariableTypes {
+		if _, exists := cfg.VariableTypes[name]; exists {
+			fmt.Printf("Warning: Variable type '%s' from %s overwrites existing type\n", name, filename)
+		}
+		cfg.VariableTypes[name] = varType
+	}
+
+	// Merge snippets
+	for name, snippet := range additionalConfig.Snippets {
 		if _, exists := cfg.Snippets[name]; exists {
 			fmt.Printf("Warning: Snippet '%s' from %s overwrites existing snippet\n", name, filename)
 		}
@@ -221,7 +248,7 @@ func createDefaultConfig() *models.Config {
 		VariableTypes:      make(map[string]models.VariableType),
 		Snippets:           make(map[string]models.Snippet),
 		Settings: models.Settings{
-			AdditionalSnippets: []string{
+			AdditionalConfigs: []string{
 				"snippets/*.yaml",
 			},
 			Interactive: models.InteractiveConfig{

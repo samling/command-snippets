@@ -18,7 +18,7 @@
 go.work
 
 # Built binary
-tplkit
+cs
 
 # IDE files
 .vscode/
