@@ -19,9 +19,12 @@
 # Build from source
 git clone <repository>
 cd tplkit
-go build -o tplkit
-sudo mv tplkit /usr/local/bin/
+
+# Build and install binary + setup config directory
+make install
 ```
+
+**Note:** The `snippets/` directory in this repository contains example snippet files that you can use as reference for creating your own templates.
 
 ### Basic Usage
 
@@ -38,6 +41,221 @@ tplkit exec kubectl-get-pods
 # Search for templates
 tplkit search kubernetes
 ```
+
+## Shell Integration
+
+TplKit is designed to integrate seamlessly with your shell workflow. The default behavior outputs clean commands to stdout, making it perfect for shell functions and keybindings.
+
+### Execution Modes
+
+```bash
+# Print command only (default - perfect for shell integration)
+tplkit exec kubectl-get-pods
+
+# Execute automatically without prompting
+tplkit exec kubectl-get-pods --run
+
+# Prompt before executing (classic behavior)
+tplkit exec kubectl-get-pods --prompt
+```
+
+### Zsh Keybinding Integration
+
+Create a zsh function to invoke TplKit with a keybinding (e.g., Ctrl-S) that inserts the generated command directly into your command line:
+
+**Setup:**
+
+Add this to your `~/.zshrc`:
+
+```zsh
+# TplKit integration - Ctrl-S to invoke template selector
+function tplkit-select() {
+  RBUFFER=$(tplkit exec)  # Uses default config: ~/.config/tplkit/config.yaml
+  CURSOR=$#BUFFER
+  zle redisplay
+}
+
+# Register the function as a zle widget
+zle -N tplkit-select
+
+# Disable terminal flow control (frees up Ctrl-S)
+stty -ixon
+
+# Bind Ctrl-S to our function
+bindkey '^s' tplkit-select
+```
+
+**Usage:**
+
+1. **Press Ctrl-S** → TplKit opens with your configured selector (e.g., fzf)
+2. **Select a template** → Interactive prompts appear for variables
+3. **Fill in variables** → Validation ensures correct input
+4. **Command appears** → Generated command is inserted at your cursor position
+
+**Example workflow:**
+```bash
+❯ kubectl get pods  # Your existing partial command
+# Press Ctrl-S, select "port-forward", fill variables
+❯ kubectl get pods kubectl port-forward svc/my-app 8080:8080 -n production
+#                  ↑ New command inserted at cursor
+```
+
+### External Selector Configuration
+
+TplKit supports external selectors like fzf, rofi, or dmenu for better template selection:
+
+```yaml
+# In your ~/.config/tplkit/config.yaml
+settings:
+  selector:
+    command: "fzf"
+    options: "--height 40% --reverse --border --header='Select template:'"
+```
+
+**Popular selector configurations:**
+
+```yaml
+# fzf (recommended)
+selector:
+  command: "fzf"
+  options: "--height 40% --reverse --border --preview 'echo {}' --header='Select template:'"
+
+# rofi
+selector:
+  command: "rofi"
+  options: "-dmenu -i -p 'Template' -theme-str 'window {width: 50%;} listview {lines: 10;}'"
+
+# dmenu
+selector:
+  command: "dmenu"
+  options: "-l 10 -p 'Select template:' -fn 'monospace-12'"
+```
+
+### Bash Integration
+
+For bash users, you can create a similar function:
+
+```bash
+# Add to ~/.bashrc
+tplkit-select() {
+  local cmd=$(tplkit exec)  # Uses default config: ~/.config/tplkit/config.yaml
+  if [[ -n "$cmd" ]]; then
+    READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}$cmd${READLINE_LINE:$READLINE_POINT}"
+    READLINE_POINT=$((READLINE_POINT + ${#cmd}))
+  fi
+}
+
+# Bind to Ctrl-S
+bind -x '"\C-s": tplkit-select'
+```
+
+### Pipeline Integration
+
+TplKit's clean stdout makes it perfect for pipelines:
+
+```bash
+# Save command to file
+tplkit exec kubectl-get-pods > my-command.sh
+
+# Execute directly
+tplkit exec kubectl-get-pods | sh
+
+# Modify and execute
+tplkit exec kubectl-get-pods | sed 's/kubectl/sudo kubectl/' | sh
+
+# Copy to clipboard (with xclip or pbcopy)
+tplkit exec kubectl-get-pods | xclip -selection clipboard
+```
+
+## Configuration Organization
+
+TplKit supports modular configuration to help organize your templates:
+
+### Single Config File (Default)
+
+The simplest approach - everything in one file:
+
+```yaml
+# ~/.config/tplkit/config.yaml
+transform_templates:
+  k8s-namespace:
+    # ... transform rules
+    
+variable_types:
+  port:
+    # ... validation rules
+    
+snippets:
+  kubectl-get-pods:
+    # ... your templates
+
+settings:
+  # ... settings
+```
+
+### Modular Configuration with Additional Snippets
+
+For better organization, split snippets into separate files:
+
+```yaml
+# ~/.config/tplkit/config.yaml
+transform_templates:
+  # Shared transform templates
+  k8s-namespace:
+    description: "Kubernetes namespace: empty=none, 'all'=-A, name=-n <name>"
+    transform:
+      empty_value: ""
+      value_pattern: |
+        {{- if eq .Value "all" -}}
+          -A
+        {{- else -}}
+          -n {{.Value}}
+        {{- end -}}
+
+variable_types:
+  # Shared variable types
+  port:
+    description: "Network port"
+    validation:
+      range: [1, 65535]
+    default: "8080"
+
+snippets:
+  # Core snippets can still go here
+  
+settings:
+  # Load additional snippet files
+  additional_snippets:
+    - "snippets/kubernetes.yaml"
+    - "snippets/docker.yaml"
+    - "snippets/git.yaml"
+    - "~/my-custom-snippets.yaml"  # Absolute paths work too
+```
+
+Then organize your snippets by topic:
+
+```yaml
+# ~/.config/tplkit/snippets/kubernetes.yaml
+snippets:
+  kubectl-describe-pod:
+    id: "kubectl-describe-pod"
+    description: "Describe a specific pod"
+    command: "kubectl describe pod <pod_name> <namespace>"
+    variables:
+      - name: "pod_name"
+        description: "Pod name to describe"
+        required: true
+      - name: "namespace"
+        transformTemplate: "k8s-namespace"  # References main config
+    tags: ["kubernetes", "describe"]
+```
+
+### Benefits of Modular Organization
+
+- **Team Sharing**: Share topic-specific snippet files across team members
+- **Maintainability**: Easier to manage large collections of templates
+- **Flexibility**: Mix and match snippet collections for different projects
+- **Version Control**: Track changes to specific command categories separately
 
 ## Core Concepts
 

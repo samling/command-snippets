@@ -136,12 +136,35 @@ func selectSnippet(forceInternal bool) (string, error) {
 		Options: options,
 	}
 
-	if err := survey.AskOne(prompt, &selected); err != nil {
-		// Handle survey cancellation as user cancellation too
+	// Get direct terminal access to work around stdout redirection
+	termIn, termOut, err := getTerminalIO()
+	if err != nil {
+		return "", fmt.Errorf("cannot access terminal: %w", err)
+	}
+
+	stdio := survey.WithStdio(termIn, termOut, termOut)
+
+	if err := survey.AskOne(prompt, &selected, stdio); err != nil {
+		// Handle survey interrupts and cancellations as user cancellation
+		if isSurveyUserCancellation(err) {
+			os.Exit(0)
+		}
 		return "", &UserCancellationError{"user cancelled selection"}
 	}
 
 	return snippetMap[selected], nil
+}
+
+// getTerminalIO returns file handles for direct terminal access
+// This ensures interactive prompts work even when stdout is redirected
+func getTerminalIO() (*os.File, *os.File, error) {
+	// Try to open /dev/tty for direct terminal access
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		// Fallback to stdin/stderr if /dev/tty is not available
+		return os.Stdin, os.Stderr, nil
+	}
+	return tty, tty, nil
 }
 
 // tryExternalSelector attempts to use configured external selector (like fzf)
@@ -218,4 +241,18 @@ func (e *UserCancellationError) Error() string {
 func isUserCancellation(err error) bool {
 	_, ok := err.(*UserCancellationError)
 	return ok
+}
+
+// isSurveyUserCancellation checks if a survey error represents user cancellation
+func isSurveyUserCancellation(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	// Common survey cancellation error messages
+	return errStr == "interrupt" ||
+		errStr == "terminal: interrupt" ||
+		strings.Contains(errStr, "interrupt") ||
+		strings.Contains(errStr, "EOF")
 }
