@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"tplkit/internal/models"
+	"cs/internal/models"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -18,8 +18,8 @@ func newEditCmd() *cobra.Command {
 		Long: `Edit a command template or configuration file in your default editor.
 
 Examples:
-  tplkit edit kubectl-get-pods       # Edit specific template
-  tplkit edit --config               # Edit configuration file`,
+  cs edit kubectl-get-pods       # Edit specific template
+  cs edit --config               # Edit configuration file`,
 		RunE: runEdit,
 	}
 
@@ -60,7 +60,7 @@ func editConfigFile() error {
 
 func editSnippet(name string, snippet *models.Snippet) error {
 	// Create a temporary file with the snippet YAML
-	tempFile, err := os.CreateTemp("", fmt.Sprintf("tplkit-edit-%s-*.yaml", name))
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("cs-edit-%s-*.yaml", name))
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}

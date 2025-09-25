@@ -17,9 +17,9 @@ func newListCmd() *cobra.Command {
 		Long: `List all available command templates with their descriptions and tags.
 
 Examples:
-  tplkit list                    # List all templates
-  tplkit list --tags k8s         # List templates with 'k8s' tag
-  tplkit list --verbose          # Show detailed information`,
+  cs list                    # List all templates
+  cs list --tags k8s         # List templates with 'k8s' tag
+  cs list --verbose          # Show detailed information`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runList(tags, verbose)
 		},
@@ -33,7 +33,7 @@ Examples:
 
 func runList(filterTags []string, verbose bool) error {
 	if len(config.Snippets) == 0 {
-		fmt.Println("No command templates found. Use 'tplkit add' to create your first template.")
+		fmt.Println("No command templates found. Use 'cs add' to create your first template.")
 		return nil
 	}
 

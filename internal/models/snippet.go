@@ -71,16 +71,11 @@ type Config struct {
 	Settings           Settings                     `yaml:"settings"`
 }
 
-// SnippetsFile represents a file containing only snippets (for additional/modular snippet files)
-type SnippetsFile struct {
-	Snippets map[string]Snippet `yaml:"snippets"`
-}
-
 // Settings contains global configuration
 type Settings struct {
-	AdditionalSnippets []string          `yaml:"additional_snippets,omitempty"`
-	Interactive        InteractiveConfig `yaml:"interactive"`
-	Selector           SelectorConfig    `yaml:"selector"`
+	AdditionalConfigs []string          `yaml:"additional_configs,omitempty"`
+	Interactive       InteractiveConfig `yaml:"interactive"`
+	Selector          SelectorConfig    `yaml:"selector"`
 }
 
 type InteractiveConfig struct {

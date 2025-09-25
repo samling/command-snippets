@@ -16,9 +16,9 @@ func newSearchCmd() *cobra.Command {
 The search looks through template names, descriptions, commands, and tags.
 
 Examples:
-  tplkit search kubectl              # Find templates containing "kubectl"
-  tplkit search "get pods"           # Find templates with "get pods"
-  tplkit search                      # Interactive search`,
+  cs search kubectl              # Find templates containing "kubectl"
+  cs search "get pods"           # Find templates with "get pods"
+  cs search                      # Interactive search`,
 		RunE: runSearch,
 	}
 
@@ -33,7 +33,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 
 	if query == "" {
 		// Interactive search could be implemented here
-		fmt.Println("Usage: tplkit search <query>")
+		fmt.Println("Usage: cs search <query>")
 		return nil
 	}
 
