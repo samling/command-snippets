@@ -2,6 +2,7 @@ package template
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -22,6 +23,32 @@ const (
 // Processor handles snippet template processing
 type Processor struct {
 	config *models.Config
+}
+
+// getTerminalIO returns file handles for direct terminal access
+// This ensures interactive prompts work even when stdout is redirected
+func getTerminalIO() (*os.File, *os.File, error) {
+	// Try to open /dev/tty for direct terminal access
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		// Fallback to stdin/stderr if /dev/tty is not available
+		return os.Stdin, os.Stderr, nil
+	}
+	return tty, tty, nil
+}
+
+// isSurveyUserCancellation checks if a survey error represents user cancellation
+func isSurveyUserCancellation(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	// Common survey cancellation error messages
+	return errStr == "interrupt" ||
+		errStr == "terminal: interrupt" ||
+		strings.Contains(errStr, "interrupt") ||
+		strings.Contains(errStr, "EOF")
 }
 
 // NewProcessor creates a new template processor
@@ -52,17 +79,29 @@ func (p *Processor) ExecuteWithMode(snippet *models.Snippet, mode ExecutionMode)
 
 	case AutoExecute:
 		// Show command with prefix, then execute
-		fmt.Printf("Command: %s\n", command)
+		fmt.Fprintf(os.Stderr, "Command: %s\n", command)
 		return p.executeCommand(command)
 
 	case PromptExecute:
 		// Show command with prefix, then ask for confirmation
-		fmt.Printf("Command: %s\n", command)
+		fmt.Fprintf(os.Stderr, "Command: %s\n", command)
+
+		// Get direct terminal access for confirmation prompt
+		termIn, termOut, err := getTerminalIO()
+		if err != nil {
+			return fmt.Errorf("cannot access terminal: %w", err)
+		}
+
 		confirm := false
 		prompt := &survey.Confirm{
 			Message: "Execute this command?",
 		}
-		if err := survey.AskOne(prompt, &confirm); err != nil {
+		stdio := survey.WithStdio(termIn, termOut, termOut)
+		if err := survey.AskOne(prompt, &confirm, stdio); err != nil {
+			// Handle survey interrupts and cancellations as user cancellation
+			if isSurveyUserCancellation(err) {
+				os.Exit(0)
+			}
 			return err
 		}
 		if !confirm {
@@ -100,13 +139,17 @@ func (p *Processor) promptForVariables(snippet *models.Snippet) (map[string]stri
 		for {
 			value, err := p.promptForVariable(variable)
 			if err != nil {
+				// Handle survey interrupts and cancellations as user cancellation
+				if isSurveyUserCancellation(err) {
+					os.Exit(0)
+				}
 				return nil, err
 			}
 
 			// Validate the value (using config for type-based validation)
 			if err := variable.ValidateWithConfig(value, p.config); err != nil {
-				fmt.Printf("❌ %v\n", err)
-				fmt.Println("Please try again.")
+				fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+				fmt.Fprintln(os.Stderr, "Please try again.")
 				continue // Reprompt for this variable
 			}
 
@@ -127,12 +170,21 @@ func (p *Processor) promptForVariable(variable models.Variable) (string, error) 
 		message = fmt.Sprintf("%s (%s)", variable.Name, variable.Description)
 	}
 
+	// Get direct terminal access to work around stdout redirection
+	termIn, termOut, err := getTerminalIO()
+	if err != nil {
+		return "", fmt.Errorf("cannot access terminal: %w", err)
+	}
+
+	// Configure survey to use terminal directly
+	stdio := survey.WithStdio(termIn, termOut, termOut)
+
 	// Handle different variable types
 	switch variable.Type {
 	case "boolean":
 		confirm := false
 		prompt := &survey.Confirm{Message: message}
-		err := survey.AskOne(prompt, &confirm)
+		err := survey.AskOne(prompt, &confirm, stdio)
 		if confirm {
 			return "true", err
 		}
@@ -153,16 +205,16 @@ func (p *Processor) promptForVariable(variable models.Variable) (string, error) 
 				Options: variable.Validation.Enum,
 				Default: variable.DefaultValue,
 			}
-			return value, survey.AskOne(selectPrompt, &value)
+			return value, survey.AskOne(selectPrompt, &value, stdio)
 		}
 
-		return value, survey.AskOne(prompt, &value)
+		return value, survey.AskOne(prompt, &value, stdio)
 	}
 }
 
 // executeCommand executes a shell command
 func (p *Processor) executeCommand(command string) error {
-	fmt.Printf("Executing: %s\n", command)
+	fmt.Fprintf(os.Stderr, "Executing: %s\n", command)
 
 	// Split command into parts for proper execution
 	parts := strings.Fields(command)
