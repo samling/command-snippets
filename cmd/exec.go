@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -113,6 +114,9 @@ func selectSnippet(forceInternal bool) (string, error) {
 		options = append(options, displayName)
 		snippetMap[displayName] = name
 	}
+
+	// Sort options alphabetically for consistent ordering
+	sort.Strings(options)
 
 	// Try external selector first (if configured and not forced to use internal)
 	if !forceInternal {
