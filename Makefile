@@ -24,16 +24,24 @@ build:
 	go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
 
-# Install the binary to system PATH
+# Install the binary and set up configuration (idempotent)
 .PHONY: install
 install: build
 	@echo "Installing $(BINARY_NAME) to $(INSTALL_DIR)..."
 	sudo install -m 755 $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
 	@echo "Installed $(BINARY_NAME) to $(INSTALL_DIR)/$(BINARY_NAME)"
 	@echo ""
-	@echo "Optional: Create default config directory"
-	@echo "  mkdir -p $(CONFIG_DIR)"
-	@echo "  cp tplkit.yaml $(CONFIG_DIR)/"
+	@echo "Setting up configuration directory..."
+	@mkdir -p $(CONFIG_DIR)/snippets
+	@if [ ! -f "$(CONFIG_DIR)/config.yaml" ]; then \
+		echo "  Creating config.yaml from default template..."; \
+		go run . --generate-config > $(CONFIG_DIR)/config.yaml; \
+		echo "Configuration created at $(CONFIG_DIR)/config.yaml"; \
+	else \
+		echo "Configuration already exists at $(CONFIG_DIR)/config.yaml - skipping"; \
+	fi
+	@echo ""
+	@echo "Installation complete! Reference examples in ./snippets/ directory"
 
 # Uninstall the binary
 .PHONY: uninstall
@@ -41,6 +49,13 @@ uninstall:
 	@echo "Removing $(BINARY_NAME) from $(INSTALL_DIR)..."
 	sudo rm -f $(INSTALL_DIR)/$(BINARY_NAME)
 	@echo "Uninstalled $(BINARY_NAME)"
+
+# Remove configuration (use with caution)
+.PHONY: clean-config
+clean-config:
+	@echo "Removing configuration from $(CONFIG_DIR)..."
+	rm -rf $(CONFIG_DIR)
+	@echo "Configuration removed"
 
 # Clean build artifacts
 .PHONY: clean
@@ -95,17 +110,18 @@ dev: build
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  build      - Build the binary"
-	@echo "  install    - Build and install to $(INSTALL_DIR)"
-	@echo "  uninstall  - Remove binary from $(INSTALL_DIR)"
-	@echo "  clean      - Remove build artifacts"
-	@echo "  test       - Run tests"
-	@echo "  lint       - Run linter (requires golangci-lint)"
-	@echo "  fmt        - Format code"
-	@echo "  tidy       - Tidy dependencies"
-	@echo "  build-all  - Build for multiple platforms"
-	@echo "  dev        - Build and run with local config"
-	@echo "  help       - Show this help message"
+	@echo "  build        - Build the binary"
+	@echo "  install      - Build and install binary + setup config (idempotent)"
+	@echo "  uninstall    - Remove binary from $(INSTALL_DIR)"
+	@echo "  clean-config - Remove configuration directory (use with caution)"
+	@echo "  clean        - Remove build artifacts"
+	@echo "  test         - Run tests"
+	@echo "  lint         - Run linter (requires golangci-lint)"
+	@echo "  fmt          - Format code"
+	@echo "  tidy         - Tidy dependencies"
+	@echo "  build-all    - Build for multiple platforms"
+	@echo "  dev          - Build and run with local config"
+	@echo "  help         - Show this help message"
 
 # Check if binary exists and show version/info
 .PHONY: info
