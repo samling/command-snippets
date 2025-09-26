@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"cs/internal/models"
+	"github.com/samling/command-snippets/internal/models"
 
 	"github.com/AlecAivazis/survey/v2"
 )

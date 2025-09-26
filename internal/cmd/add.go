@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"cs/internal/models"
+	"github.com/samling/command-snippets/internal/models"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"

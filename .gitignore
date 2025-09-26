@@ -17,8 +17,8 @@
 # Go workspace file
 go.work
 
-# Built binary
-cs
+# Built binary (only in root, not in subdirectories)
+/cs
 
 # IDE files
 .vscode/
