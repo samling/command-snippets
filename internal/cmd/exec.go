@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"cs/internal/template"
+	"github.com/samling/command-snippets/internal/template"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"

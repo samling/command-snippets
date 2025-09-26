@@ -17,11 +17,14 @@
 
 ```bash
 # Build from source
-git clone https://github.com/samling/cs.git
-cd cs
+git clone https://github.com/samling/command-snippets.git
+cd command-snippets
 
 # Build and install binary + setup config directory
 make install
+
+# Or install directly with Go
+go install github.com/samling/command-snippets/cmd/cs@latest
 ```
 
 **Note:** The `snippets/` directory in this repository contains example snippet files that you can use as reference for creating your own templates.

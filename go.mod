@@ -1,4 +1,4 @@
-module cs
+module github.com/samling/command-snippets
 
 go 1.24.0
 

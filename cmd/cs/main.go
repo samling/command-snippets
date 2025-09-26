@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"cs/cmd"
+	"github.com/samling/command-snippets/internal/cmd"
 )
 
 func main() {

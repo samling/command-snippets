@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"cs/internal/models"
+	"github.com/samling/command-snippets/internal/models"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
