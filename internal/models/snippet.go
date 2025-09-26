@@ -8,16 +8,25 @@ import (
 	"time"
 )
 
+// SnippetSource represents where a snippet was loaded from
+type SnippetSource string
+
+const (
+	SourceGlobal SnippetSource = "global"
+	SourceLocal  SnippetSource = "local"
+)
+
 // Snippet represents a command template
 type Snippet struct {
-	ID          string     `yaml:"id"`
-	Name        string     `yaml:"name"`
-	Description string     `yaml:"description"`
-	Command     string     `yaml:"command"`
-	Variables   []Variable `yaml:"variables,omitempty"`
-	Tags        []string   `yaml:"tags,omitempty"`
-	CreatedAt   time.Time  `yaml:"created_at"`
-	UpdatedAt   time.Time  `yaml:"updated_at"`
+	ID          string        `yaml:"id"`
+	Name        string        `yaml:"name"`
+	Description string        `yaml:"description"`
+	Command     string        `yaml:"command"`
+	Variables   []Variable    `yaml:"variables,omitempty"`
+	Tags        []string      `yaml:"tags,omitempty"`
+	CreatedAt   time.Time     `yaml:"created_at"`
+	UpdatedAt   time.Time     `yaml:"updated_at"`
+	Source      SnippetSource `yaml:"-"` // Not persisted to YAML, set during loading
 }
 
 // Variable defines a template variable with advanced behavior

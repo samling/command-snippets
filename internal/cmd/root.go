@@ -65,6 +65,8 @@ func init() {
 	rootCmd.AddCommand(newSearchCmd())
 	rootCmd.AddCommand(newExecCmd())
 	rootCmd.AddCommand(newEditCmd())
+	rootCmd.AddCommand(newDescribeCmd())
+	rootCmd.AddCommand(newShowCmd())
 }
 
 // initConfig reads in config file and ENV variables.
@@ -115,9 +117,20 @@ func loadConfig(filename string) (*models.Config, error) {
 		cfg.Snippets = make(map[string]models.Snippet)
 	}
 
+	// Mark all snippets from main config as global
+	for name, snippet := range cfg.Snippets {
+		snippet.Source = models.SourceGlobal
+		cfg.Snippets[name] = snippet
+	}
+
 	// Load additional configuration files if specified
 	if err := loadAdditionalConfigs(&cfg, filename); err != nil {
 		return nil, fmt.Errorf("loading additional configs: %w", err)
+	}
+
+	// Load local project snippets if .csnippets file exists in current directory
+	if err := loadLocalSnippets(&cfg); err != nil {
+		return nil, fmt.Errorf("loading local snippets: %w", err)
 	}
 
 	return &cfg, nil
@@ -168,6 +181,10 @@ func loadAdditionalConfigs(cfg *models.Config, configDir string) error {
 
 // loadConfigFile loads a config file and merges it into the main config
 func loadConfigFile(cfg *models.Config, filename string) error {
+	return loadConfigFileWithSource(cfg, filename, models.SourceGlobal)
+}
+
+func loadConfigFileWithSource(cfg *models.Config, filename string, source models.SnippetSource) error {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return err
@@ -205,12 +222,30 @@ func loadConfigFile(cfg *models.Config, filename string) error {
 		cfg.VariableTypes[name] = varType
 	}
 
-	// Merge snippets
+	// Merge snippets with source tracking
 	for name, snippet := range additionalConfig.Snippets {
 		if _, exists := cfg.Snippets[name]; exists {
 			fmt.Printf("Warning: Snippet '%s' from %s overwrites existing snippet\n", name, filename)
 		}
+		snippet.Source = source // Set the source for this snippet
 		cfg.Snippets[name] = snippet
+	}
+
+	return nil
+}
+
+// loadLocalSnippets loads snippets from a local .csnippets file in the current directory
+func loadLocalSnippets(cfg *models.Config) error {
+	// Check if .csnippets file exists in current working directory
+	localSnippetsFile := ".csnippets"
+	if _, err := os.Stat(localSnippetsFile); os.IsNotExist(err) {
+		// No local snippets file, that's fine
+		return nil
+	}
+
+	// Load the local snippets file with local source marking
+	if err := loadConfigFileWithSource(cfg, localSnippetsFile, models.SourceLocal); err != nil {
+		return fmt.Errorf("loading local snippets from %s: %w", localSnippetsFile, err)
 	}
 
 	return nil

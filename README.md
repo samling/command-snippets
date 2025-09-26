@@ -62,6 +62,32 @@ cs exec kubectl-get-pods --prompt
 cs exec kubectl-get-pods --run
 ```
 
+### Pre-setting Variables
+
+Like Helm, CS supports pre-populating template variables using `--set`:
+
+```bash
+# Set single variable
+cs exec kubectl-get-pods --set namespace=kube-system
+
+# Set multiple variables
+cs exec docker-run --set port=8080 --set image=nginx --set detach=true
+
+# Mix preset and interactive (only prompts for unset variables)
+cs exec kubectl-port-forward --set namespace=default
+# Will only prompt for pod_name and ports
+
+# Use with automation/scripting
+cs exec kubectl-apply --set file=deployment.yaml --run
+```
+
+**Benefits of `--set`:**
+- **Automation**: Perfect for CI/CD pipelines and scripts
+- **Speed**: Skip interactive prompts for known values
+- **Flexibility**: Mix preset and interactive variables
+- **Validation**: All `--set` values go through the same validation as interactive input
+- **Error Handling**: Clear error messages for invalid preset values
+
 ### Zsh Keybinding Integration
 
 Create a zsh function to invoke CS with a keybinding (e.g., Ctrl-S) that inserts the generated command directly into your command line:
@@ -224,12 +250,42 @@ snippets:
     tags: ["kubernetes", "describe"]
 ```
 
+### Local Project Snippets
+
+CS also supports project-specific snippets via `.csnippets` files:
+
+```yaml
+# .csnippets (in your project directory)
+snippets:
+  dev-build:
+    description: "Build this project"
+    command: "go build -o ./bin/<project_name> ."
+    variables:
+      - name: "project_name"
+        description: "Project binary name"
+        default: "myapp"
+    tags: ["development", "build"]
+  
+  dev-test:
+    description: "Run project tests with coverage"
+    command: "go test -cover ./..."
+    tags: ["development", "test"]
+```
+
+**How it works:**
+- CS automatically looks for `.csnippets` in your current working directory
+- Local snippets are loaded in addition to your global configuration
+- Local snippets can override global ones (you'll see a warning)
+- Perfect for project-specific build, test, and deployment commands
+- Can be committed to share with your team or kept local (ignored by default in `.gitignore`)
+
 ### Benefits of Modular Organization
 
 - **Team Sharing**: Share topic-specific snippet files across team members
 - **Maintainability**: Easier to manage large collections of templates
 - **Flexibility**: Mix and match snippet collections for different projects
 - **Version Control**: Track changes to specific command categories separately
+- **Project Context**: Local `.csnippets` files provide project-specific commands
 
 ## Core Concepts
 
@@ -298,10 +354,16 @@ During creation, you'll be prompted to configure each variable found in your com
 ### `cs list`
 List and filter templates:
 ```bash
-cs list                  # List all templates
+cs list                  # List all templates (grouped by source)
 cs list --tags kubernetes # Filter by tags
 cs list --verbose        # Show detailed info
 ```
+
+The `list` command automatically groups templates by source:
+- **Local (project-specific) templates**: Snippets loaded from `.csnippets` in your current directory
+- **Global templates**: Snippets from your main config and additional config files
+
+This makes it easy to see which commands are available globally vs just in the current project.
 
 ### `cs exec`
 Execute templates with interactive prompting:
@@ -316,6 +378,37 @@ Search through templates:
 cs search kubectl        # Find templates containing "kubectl"
 cs search "get pods"     # Multi-word search
 ```
+
+### `cs show`
+Display configuration components:
+```bash
+cs show transforms       # Show all transform templates
+cs show types           # Show all variable types
+cs show config          # Show configuration summary
+```
+
+The `show` command helps you understand what building blocks are available:
+- **`cs show transforms`**: Display all transform templates with their patterns and logic
+- **`cs show types`**: Show variable types with validation rules and defaults  
+- **`cs show config`**: Overview of your entire configuration (templates, types, snippets, settings)
+
+This is especially useful when creating new templates or debugging configuration issues.
+
+### `cs describe`
+Show detailed information about a template:
+```bash
+cs describe kubectl-get-pods      # Show template details and variables
+cs describe docker-run            # Show validation rules and defaults
+```
+
+The `describe` command shows:
+- Template description and command pattern
+- All variables with their types, validation rules, and defaults
+- Computed variables and their composition logic
+- Transform templates being used
+- Tags for organization
+
+This is perfect for understanding what variables a template expects before running it, especially useful when using `--set` flags or in automation scenarios.
 
 ### `cs edit`
 Edit templates or configuration:

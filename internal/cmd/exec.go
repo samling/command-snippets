@@ -28,7 +28,9 @@ If no template name is provided, you'll be prompted to select from available tem
 Examples:
   cs exec kubectl-get-pods              # Print command only (default)
   cs exec kubectl-get-pods --run        # Execute automatically
-  cs exec kubectl-get-pods --prompt     # Prompt before executing`,
+  cs exec kubectl-get-pods --prompt     # Prompt before executing
+  cs exec kubectl-get-pods --set namespace=kube-system  # Pre-set variables
+  cs exec docker-run --set port=8080 --set image=nginx  # Multiple variables`,
 		RunE: runExec,
 	}
 
@@ -36,6 +38,7 @@ Examples:
 	cmd.Flags().Bool("run", false, "Automatically execute the command without prompting")
 	cmd.Flags().Bool("prompt", false, "Prompt before executing the command")
 	cmd.Flags().Bool("no-selector", false, "Use internal selector instead of configured external selector")
+	cmd.Flags().StringArray("set", []string{}, "Set variable values (format: key=value)")
 
 	return cmd
 }
@@ -77,6 +80,14 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--run and --prompt flags are mutually exclusive")
 	}
 
+	// Parse --set values
+	setValues, _ := cmd.Flags().GetStringArray("set")
+
+	presetValues, err := parseSetValues(setValues)
+	if err != nil {
+		return fmt.Errorf("invalid --set format: %w", err)
+	}
+
 	// Determine execution mode
 	var execMode template.ExecutionMode
 	switch {
@@ -89,7 +100,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute with specified mode
-	return processor.ExecuteWithMode(&snippet, execMode)
+	return processor.ExecuteWithModeAndPresets(&snippet, execMode, presetValues)
 }
 
 // selectSnippet shows an interactive snippet selector
@@ -259,4 +270,37 @@ func isSurveyUserCancellation(err error) bool {
 		errStr == "terminal: interrupt" ||
 		strings.Contains(errStr, "interrupt") ||
 		strings.Contains(errStr, "EOF")
+}
+
+// parseSetValues parses --set values into a map
+func parseSetValues(setValues []string) (map[string]string, error) {
+	result := make(map[string]string)
+
+	// Parse --set values
+	for _, setValue := range setValues {
+		key, value, err := parseKeyValue(setValue)
+		if err != nil {
+			return nil, fmt.Errorf("--set %s: %w", setValue, err)
+		}
+		result[key] = value
+	}
+
+	return result, nil
+}
+
+// parseKeyValue parses a key=value string
+func parseKeyValue(input string) (string, string, error) {
+	parts := strings.SplitN(input, "=", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("expected format key=value, got: %s", input)
+	}
+
+	key := strings.TrimSpace(parts[0])
+	value := strings.TrimSpace(parts[1])
+
+	if key == "" {
+		return "", "", fmt.Errorf("key cannot be empty")
+	}
+
+	return key, value, nil
 }
