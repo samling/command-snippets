@@ -33,7 +33,7 @@ Examples:
 
 func runShow(cmd *cobra.Command, args []string) error {
 	subcommand := args[0]
-	
+
 	switch subcommand {
 	case "transforms":
 		return showTransforms()
@@ -66,14 +66,14 @@ func showTransforms() error {
 		if i > 0 {
 			fmt.Println() // Add spacing between templates
 		}
-		
+
 		template := config.TransformTemplates[name]
 		fmt.Printf("%s:\n", name)
-		
+
 		if template.Description != "" {
 			fmt.Printf("  Description: %s\n", template.Description)
 		}
-		
+
 		if template.Transform != nil {
 			displayTransform(template.Transform, "  ")
 		}
@@ -102,23 +102,23 @@ func showTypes() error {
 		if i > 0 {
 			fmt.Println() // Add spacing between types
 		}
-		
+
 		varType := config.VariableTypes[name]
 		fmt.Printf("%s:\n", name)
-		
+
 		if varType.Description != "" {
 			fmt.Printf("  Description: %s\n", varType.Description)
 		}
-		
+
 		if varType.Default != "" {
 			fmt.Printf("  Default: %s\n", varType.Default)
 		}
-		
+
 		if varType.Validation != nil {
 			fmt.Printf("  Validation:\n")
 			displayValidation(varType.Validation, "    ")
 		}
-		
+
 		if varType.Transform != nil {
 			fmt.Printf("  Transform:\n")
 			displayTransform(varType.Transform, "    ")
@@ -141,9 +141,9 @@ func showConfig() error {
 		sort.Strings(names)
 		fmt.Printf("  - %s\n", strings.Join(names, "\n  - "))
 	}
-	
+
 	fmt.Println()
-	
+
 	// Variable types count
 	fmt.Printf("Variable Types: %d\n", len(config.VariableTypes))
 	if len(config.VariableTypes) > 0 {
@@ -154,9 +154,9 @@ func showConfig() error {
 		sort.Strings(names)
 		fmt.Printf("  - %s\n", strings.Join(names, "\n  - "))
 	}
-	
+
 	fmt.Println()
-	
+
 	// Snippets count
 	fmt.Printf("Snippets: %d\n", len(config.Snippets))
 	if len(config.Snippets) > 0 {
@@ -173,9 +173,9 @@ func showConfig() error {
 			fmt.Printf("  ... and %d more\n", len(names)-5)
 		}
 	}
-	
+
 	fmt.Println()
-	
+
 	// Settings
 	fmt.Printf("Settings:\n")
 	if len(config.Settings.AdditionalConfigs) > 0 {
@@ -184,8 +184,8 @@ func showConfig() error {
 	if config.Settings.Selector.Command != "" {
 		fmt.Printf("  External Selector: %s %s\n", config.Settings.Selector.Command, config.Settings.Selector.Options)
 	}
-	fmt.Printf("  Interactive Settings: confirm_before_execute=%t, show_final_command=%t\n", 
-		config.Settings.Interactive.ConfirmBeforeExecute, 
+	fmt.Printf("  Interactive Settings: confirm_before_execute=%t, show_final_command=%t\n",
+		config.Settings.Interactive.ConfirmBeforeExecute,
 		config.Settings.Interactive.ShowFinalCommand)
 
 	return nil
@@ -196,7 +196,7 @@ func displayTransform(transform *models.Transform, indent string) {
 	if transform.EmptyValue != "" {
 		fmt.Printf("%sEmpty Value: %s\n", indent, transform.EmptyValue)
 	}
-	
+
 	if transform.ValuePattern != "" {
 		// Handle multiline value patterns
 		lines := strings.Split(strings.TrimSpace(transform.ValuePattern), "\n")
@@ -209,15 +209,15 @@ func displayTransform(transform *models.Transform, indent string) {
 			}
 		}
 	}
-	
+
 	if transform.TrueValue != "" {
 		fmt.Printf("%sTrue Value: %s\n", indent, transform.TrueValue)
 	}
-	
+
 	if transform.FalseValue != "" {
 		fmt.Printf("%sFalse Value: %s\n", indent, transform.FalseValue)
 	}
-	
+
 	if transform.Compose != "" {
 		// Handle multiline compose patterns
 		lines := strings.Split(strings.TrimSpace(transform.Compose), "\n")
@@ -237,11 +237,11 @@ func displayValidation(validation *models.Validation, indent string) {
 	if len(validation.Enum) > 0 {
 		fmt.Printf("%sAllowed values: %s\n", indent, strings.Join(validation.Enum, ", "))
 	}
-	
+
 	if len(validation.Range) == 2 {
 		fmt.Printf("%sRange: %d - %d\n", indent, validation.Range[0], validation.Range[1])
 	}
-	
+
 	if validation.Pattern != "" {
 		fmt.Printf("%sPattern: %s\n", indent, validation.Pattern)
 	}

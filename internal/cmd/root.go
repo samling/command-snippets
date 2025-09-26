@@ -117,6 +117,12 @@ func loadConfig(filename string) (*models.Config, error) {
 		cfg.Snippets = make(map[string]models.Snippet)
 	}
 
+	// Mark all snippets from main config as global
+	for name, snippet := range cfg.Snippets {
+		snippet.Source = models.SourceGlobal
+		cfg.Snippets[name] = snippet
+	}
+
 	// Load additional configuration files if specified
 	if err := loadAdditionalConfigs(&cfg, filename); err != nil {
 		return nil, fmt.Errorf("loading additional configs: %w", err)
@@ -175,6 +181,10 @@ func loadAdditionalConfigs(cfg *models.Config, configDir string) error {
 
 // loadConfigFile loads a config file and merges it into the main config
 func loadConfigFile(cfg *models.Config, filename string) error {
+	return loadConfigFileWithSource(cfg, filename, models.SourceGlobal)
+}
+
+func loadConfigFileWithSource(cfg *models.Config, filename string, source models.SnippetSource) error {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return err
@@ -212,11 +222,12 @@ func loadConfigFile(cfg *models.Config, filename string) error {
 		cfg.VariableTypes[name] = varType
 	}
 
-	// Merge snippets
+	// Merge snippets with source tracking
 	for name, snippet := range additionalConfig.Snippets {
 		if _, exists := cfg.Snippets[name]; exists {
 			fmt.Printf("Warning: Snippet '%s' from %s overwrites existing snippet\n", name, filename)
 		}
+		snippet.Source = source // Set the source for this snippet
 		cfg.Snippets[name] = snippet
 	}
 
@@ -232,8 +243,8 @@ func loadLocalSnippets(cfg *models.Config) error {
 		return nil
 	}
 
-	// Load the local snippets file
-	if err := loadConfigFile(cfg, localSnippetsFile); err != nil {
+	// Load the local snippets file with local source marking
+	if err := loadConfigFileWithSource(cfg, localSnippetsFile, models.SourceLocal); err != nil {
 		return fmt.Errorf("loading local snippets from %s: %w", localSnippetsFile, err)
 	}
 

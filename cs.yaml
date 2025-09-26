@@ -57,8 +57,8 @@ snippets: {}
 
 # Global settings
 settings:
-  # Optional: Load additional snippet files (relative to this config file)
-  additional_snippets:
+  # Optional: Load additional config files (relative to this config file)
+  additional_configs:
     - "snippets/kubernetes.yaml"
     - "snippets/docker.yaml"
     - "snippets/git.yaml"

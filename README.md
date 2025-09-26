@@ -354,10 +354,16 @@ During creation, you'll be prompted to configure each variable found in your com
 ### `cs list`
 List and filter templates:
 ```bash
-cs list                  # List all templates
+cs list                  # List all templates (grouped by source)
 cs list --tags kubernetes # Filter by tags
 cs list --verbose        # Show detailed info
 ```
+
+The `list` command automatically groups templates by source:
+- **Local (project-specific) templates**: Snippets loaded from `.csnippets` in your current directory
+- **Global templates**: Snippets from your main config and additional config files
+
+This makes it easy to see which commands are available globally vs just in the current project.
 
 ### `cs exec`
 Execute templates with interactive prompting:
@@ -372,6 +378,21 @@ Search through templates:
 cs search kubectl        # Find templates containing "kubectl"
 cs search "get pods"     # Multi-word search
 ```
+
+### `cs show`
+Display configuration components:
+```bash
+cs show transforms       # Show all transform templates
+cs show types           # Show all variable types
+cs show config          # Show configuration summary
+```
+
+The `show` command helps you understand what building blocks are available:
+- **`cs show transforms`**: Display all transform templates with their patterns and logic
+- **`cs show types`**: Show variable types with validation rules and defaults  
+- **`cs show config`**: Overview of your entire configuration (templates, types, snippets, settings)
+
+This is especially useful when creating new templates or debugging configuration issues.
 
 ### `cs describe`
 Show detailed information about a template:
