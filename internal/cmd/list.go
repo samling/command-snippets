@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -39,7 +40,17 @@ func runList(filterTags []string, verbose bool) error {
 
 	fmt.Printf("Available command templates:\n\n")
 
-	for name, snippet := range config.Snippets {
+	// Get all snippet names and sort them alphabetically
+	var names []string
+	for name := range config.Snippets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	// Iterate through sorted names
+	for _, name := range names {
+		snippet := config.Snippets[name]
+
 		// Filter by tags if specified
 		if len(filterTags) > 0 && !hasAnyTag(snippet.Tags, filterTags) {
 			continue

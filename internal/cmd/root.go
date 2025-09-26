@@ -65,6 +65,8 @@ func init() {
 	rootCmd.AddCommand(newSearchCmd())
 	rootCmd.AddCommand(newExecCmd())
 	rootCmd.AddCommand(newEditCmd())
+	rootCmd.AddCommand(newDescribeCmd())
+	rootCmd.AddCommand(newShowCmd())
 }
 
 // initConfig reads in config file and ENV variables.
@@ -118,6 +120,11 @@ func loadConfig(filename string) (*models.Config, error) {
 	// Load additional configuration files if specified
 	if err := loadAdditionalConfigs(&cfg, filename); err != nil {
 		return nil, fmt.Errorf("loading additional configs: %w", err)
+	}
+
+	// Load local project snippets if .csnippets file exists in current directory
+	if err := loadLocalSnippets(&cfg); err != nil {
+		return nil, fmt.Errorf("loading local snippets: %w", err)
 	}
 
 	return &cfg, nil
@@ -211,6 +218,23 @@ func loadConfigFile(cfg *models.Config, filename string) error {
 			fmt.Printf("Warning: Snippet '%s' from %s overwrites existing snippet\n", name, filename)
 		}
 		cfg.Snippets[name] = snippet
+	}
+
+	return nil
+}
+
+// loadLocalSnippets loads snippets from a local .csnippets file in the current directory
+func loadLocalSnippets(cfg *models.Config) error {
+	// Check if .csnippets file exists in current working directory
+	localSnippetsFile := ".csnippets"
+	if _, err := os.Stat(localSnippetsFile); os.IsNotExist(err) {
+		// No local snippets file, that's fine
+		return nil
+	}
+
+	// Load the local snippets file
+	if err := loadConfigFile(cfg, localSnippetsFile); err != nil {
+		return fmt.Errorf("loading local snippets from %s: %w", localSnippetsFile, err)
 	}
 
 	return nil

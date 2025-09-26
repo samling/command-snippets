@@ -60,7 +60,12 @@ func NewProcessor(config *models.Config) *Processor {
 
 // ExecuteWithMode prompts for variables and handles execution based on specified mode
 func (p *Processor) ExecuteWithMode(snippet *models.Snippet, mode ExecutionMode) error {
-	values, err := p.promptForVariables(snippet)
+	return p.ExecuteWithModeAndPresets(snippet, mode, nil)
+}
+
+// ExecuteWithModeAndPresets prompts for variables (skipping preset ones) and handles execution
+func (p *Processor) ExecuteWithModeAndPresets(snippet *models.Snippet, mode ExecutionMode, presetValues map[string]string) error {
+	values, err := p.promptForVariablesWithPresets(snippet, presetValues)
 	if err != nil {
 		return err
 	}
@@ -133,6 +138,59 @@ func (p *Processor) promptForVariables(snippet *models.Snippet) (map[string]stri
 	for _, variable := range snippet.Variables {
 		if variable.Computed {
 			continue // Skip computed variables
+		}
+
+		// Loop until we get valid input
+		for {
+			value, err := p.promptForVariable(variable)
+			if err != nil {
+				// Handle survey interrupts and cancellations as user cancellation
+				if isSurveyUserCancellation(err) {
+					os.Exit(0)
+				}
+				return nil, err
+			}
+
+			// Validate the value (using config for type-based validation)
+			if err := variable.ValidateWithConfig(value, p.config); err != nil {
+				fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+				fmt.Fprintln(os.Stderr, "Please try again.")
+				continue // Reprompt for this variable
+			}
+
+			// Valid input - store it and move to next variable
+			values[variable.Name] = value
+			break
+		}
+	}
+
+	return values, nil
+}
+
+// promptForVariablesWithPresets interactively prompts for snippet variables, using preset values where available
+func (p *Processor) promptForVariablesWithPresets(snippet *models.Snippet, presetValues map[string]string) (map[string]string, error) {
+	values := make(map[string]string)
+
+	// Initialize with preset values
+	if presetValues != nil {
+		for key, value := range presetValues {
+			values[key] = value
+		}
+	}
+
+	// Prompt for each variable defined in the snippet
+	for _, variable := range snippet.Variables {
+		if variable.Computed {
+			continue // Skip computed variables
+		}
+
+		// Skip if already set via --set
+		if _, exists := values[variable.Name]; exists {
+			// Validate the preset value
+			if err := variable.ValidateWithConfig(values[variable.Name], p.config); err != nil {
+				return nil, fmt.Errorf("preset value for '%s': %w", variable.Name, err)
+			}
+			continue
 		}
 
 		// Loop until we get valid input

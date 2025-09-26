@@ -44,5 +44,8 @@ Thumbs.db
 config.yaml
 snippets.yaml
 
+# Local project snippets (can be committed if desired)
+.csnippets
+
 # Logs
 *.log
