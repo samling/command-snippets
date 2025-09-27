@@ -47,6 +47,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	processor := template.NewProcessor(config)
 
 	var snippetName string
+	var err error
 
 	// If snippet name provided as argument
 	if len(args) > 0 {
@@ -54,7 +55,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 	} else {
 		// Interactive snippet selection
 		noSelector, _ := cmd.Flags().GetBool("no-selector")
-		var err error
 		snippetName, err = selectSnippet(noSelector)
 		if err != nil {
 			// Handle user cancellation silently
@@ -100,7 +100,15 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute with specified mode
-	return processor.ExecuteWithModeAndPresets(&snippet, execMode, presetValues)
+	err = processor.ExecuteWithModeAndPresets(&snippet, execMode, presetValues)
+	if err != nil {
+		// Handle user cancellation silently
+		if isUserCancellation(err) || isHuhUserCancellation(err) {
+			os.Exit(0)
+		}
+		return err
+	}
+	return nil
 }
 
 // selectSnippet shows an interactive snippet selector
@@ -268,6 +276,21 @@ func isSurveyUserCancellation(err error) bool {
 	// Common survey cancellation error messages
 	return errStr == "interrupt" ||
 		errStr == "terminal: interrupt" ||
+		strings.Contains(errStr, "interrupt") ||
+		strings.Contains(errStr, "EOF")
+}
+
+// isHuhUserCancellation checks if a huh error represents user cancellation
+func isHuhUserCancellation(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	// Common huh cancellation error messages
+	return errStr == "user aborted" ||
+		errStr == "interrupt" ||
+		strings.Contains(errStr, "user aborted") ||
 		strings.Contains(errStr, "interrupt") ||
 		strings.Contains(errStr, "EOF")
 }

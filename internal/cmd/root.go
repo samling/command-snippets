@@ -42,7 +42,8 @@ Features:
 			fmt.Print(string(data))
 			return nil
 		}
-		return cmd.Help()
+		// Default to exec behavior when no subcommand is provided
+		return runExec(cmd, args)
 	},
 }
 
@@ -58,6 +59,12 @@ func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/cs/config.yaml)")
 	rootCmd.Flags().BoolVar(&generateConfig, "generate-config", false, "generate default config to stdout")
+
+	// Add exec command flags to root for default behavior
+	rootCmd.Flags().Bool("run", false, "Automatically execute the command without prompting")
+	rootCmd.Flags().Bool("prompt", false, "Prompt before executing the command")
+	rootCmd.Flags().Bool("no-selector", false, "Use internal selector instead of configured external selector")
+	rootCmd.Flags().StringArray("set", []string{}, "Set variable values (format: key=value)")
 
 	// Add subcommands
 	rootCmd.AddCommand(newAddCmd())

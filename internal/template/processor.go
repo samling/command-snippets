@@ -52,6 +52,21 @@ func isSurveyUserCancellation(err error) bool {
 		strings.Contains(errStr, "EOF")
 }
 
+// isHuhUserCancellation checks if a huh error represents user cancellation
+func isHuhUserCancellation(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	// Common huh cancellation error messages
+	return errStr == "user aborted" ||
+		errStr == "interrupt" ||
+		strings.Contains(errStr, "user aborted") ||
+		strings.Contains(errStr, "interrupt") ||
+		strings.Contains(errStr, "EOF")
+}
+
 // NewProcessor creates a new template processor
 func NewProcessor(config *models.Config) *Processor {
 	return &Processor{
@@ -290,6 +305,10 @@ func (p *Processor) promptVariablesForm(variables []models.Variable) (map[string
 
 	err := form.Run()
 	if err != nil {
+		// Handle user cancellation (Ctrl-C) silently
+		if isHuhUserCancellation(err) {
+			os.Exit(0)
+		}
 		return nil, err
 	}
 
