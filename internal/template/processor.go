@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/huh"
 	"github.com/samling/command-snippets/internal/models"
 
@@ -16,9 +18,10 @@ import (
 type ExecutionMode int
 
 const (
-	PrintOnly     ExecutionMode = iota // Print command only (default)
-	AutoExecute                        // Execute automatically without prompting
-	PromptExecute                      // Prompt before executing (original behavior)
+	CopyToClipboard ExecutionMode = iota // Copy command to clipboard (default)
+	PrintOnly                            // Print command only
+	AutoExecute                          // Execute automatically without prompting
+	PromptExecute                        // Prompt before executing (original behavior)
 )
 
 // Processor handles snippet template processing
@@ -93,6 +96,18 @@ func (p *Processor) ExecuteWithModeAndPresets(snippet *models.Snippet, mode Exec
 
 	// Handle execution based on mode
 	switch mode {
+	case CopyToClipboard:
+		// Copy command to clipboard (default behavior)
+		err := clipboard.WriteAll(command)
+		if err != nil {
+			// Fallback to printing if clipboard fails
+			fmt.Fprintf(os.Stderr, "Failed to copy to clipboard: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Command: %s\n", command)
+		} else {
+			fmt.Fprintf(os.Stderr, "Command copied to clipboard: %s\n", command)
+		}
+		return nil
+
 	case PrintOnly:
 		// Print just the raw command (perfect for piping)
 		fmt.Print(command)
@@ -298,10 +313,25 @@ func (p *Processor) promptVariablesForm(variables []models.Variable) (map[string
 		}
 	}
 
-	// Create and run the form
+	// Create and run the form with height limit for scrolling in small terminals
 	form := huh.NewForm(
 		huh.NewGroup(fields...),
 	)
+
+	// Set height for scrolling in small terminals (default 8, customizable via env var)
+	formHeight := 8
+	if heightEnv := os.Getenv("CS_FORM_HEIGHT"); heightEnv != "" {
+		if h, err := strconv.Atoi(heightEnv); err == nil && h > 0 {
+			formHeight = h
+		}
+	}
+	form = form.WithHeight(formHeight)
+
+	// Enable accessibility mode for very constrained terminals when requested
+	// This falls back to standard prompts which handle small windows better
+	if os.Getenv("ACCESSIBLE") != "" || os.Getenv("CS_ACCESSIBLE") != "" {
+		form = form.WithAccessible(true)
+	}
 
 	err := form.Run()
 	if err != nil {

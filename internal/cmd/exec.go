@@ -21,14 +21,15 @@ func newExecCmd() *cobra.Command {
 		Short: "Execute a command template with variable substitution",
 		Long: `Execute a command template with interactive variable prompting.
 
-By default, the command will be printed for copying/piping. Use flags to change behavior.
+By default, the command will be copied to clipboard. Use flags to change behavior.
 
 If no template name is provided, you'll be prompted to select from available templates.
 
 Examples:
-  cs exec kubectl-get-pods              # Print command only (default)
+  cs exec kubectl-get-pods              # Copy command to clipboard (default)
   cs exec kubectl-get-pods --run        # Execute automatically
   cs exec kubectl-get-pods --prompt     # Prompt before executing
+  cs exec kubectl-get-pods --print      # Print command only (for piping)
   cs exec kubectl-get-pods --set namespace=kube-system  # Pre-set variables
   cs exec docker-run --set port=8080 --set image=nginx  # Multiple variables`,
 		RunE: runExec,
@@ -37,6 +38,7 @@ Examples:
 	// Add execution mode flags
 	cmd.Flags().Bool("run", false, "Automatically execute the command without prompting")
 	cmd.Flags().Bool("prompt", false, "Prompt before executing the command")
+	cmd.Flags().Bool("print", false, "Print command only (for piping)")
 	cmd.Flags().Bool("no-selector", false, "Use internal selector instead of configured external selector")
 	cmd.Flags().StringArray("set", []string{}, "Set variable values (format: key=value)")
 
@@ -74,10 +76,21 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// Get execution mode flags
 	runFlag, _ := cmd.Flags().GetBool("run")
 	promptFlag, _ := cmd.Flags().GetBool("prompt")
+	printFlag, _ := cmd.Flags().GetBool("print")
 
 	// Validate flags (mutually exclusive)
-	if runFlag && promptFlag {
-		return fmt.Errorf("--run and --prompt flags are mutually exclusive")
+	flagCount := 0
+	if runFlag {
+		flagCount++
+	}
+	if promptFlag {
+		flagCount++
+	}
+	if printFlag {
+		flagCount++
+	}
+	if flagCount > 1 {
+		return fmt.Errorf("--run, --prompt, and --print flags are mutually exclusive")
 	}
 
 	// Parse --set values
@@ -95,8 +108,10 @@ func runExec(cmd *cobra.Command, args []string) error {
 		execMode = template.AutoExecute
 	case promptFlag:
 		execMode = template.PromptExecute
-	default:
+	case printFlag:
 		execMode = template.PrintOnly
+	default:
+		execMode = template.CopyToClipboard
 	}
 
 	// Execute with specified mode

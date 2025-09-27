@@ -63,6 +63,7 @@ func init() {
 	// Add exec command flags to root for default behavior
 	rootCmd.Flags().Bool("run", false, "Automatically execute the command without prompting")
 	rootCmd.Flags().Bool("prompt", false, "Prompt before executing the command")
+	rootCmd.Flags().Bool("print", false, "Print command only (for piping)")
 	rootCmd.Flags().Bool("no-selector", false, "Use internal selector instead of configured external selector")
 	rootCmd.Flags().StringArray("set", []string{}, "Set variable values (format: key=value)")
 
