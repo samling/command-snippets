@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/samling/command-snippets/internal/models"
 
 	"github.com/AlecAivazis/survey/v2"
@@ -172,13 +173,12 @@ func (p *Processor) promptForVariablesWithPresets(snippet *models.Snippet, prese
 	values := make(map[string]string)
 
 	// Initialize with preset values
-	if presetValues != nil {
-		for key, value := range presetValues {
-			values[key] = value
-		}
+	for key, value := range presetValues {
+		values[key] = value
 	}
 
-	// Prompt for each variable defined in the snippet
+	// Collect variables that need prompting
+	var variablesToPrompt []models.Variable
 	for _, variable := range snippet.Variables {
 		if variable.Computed {
 			continue // Skip computed variables
@@ -193,31 +193,121 @@ func (p *Processor) promptForVariablesWithPresets(snippet *models.Snippet, prese
 			continue
 		}
 
-		// Loop until we get valid input
-		for {
-			value, err := p.promptForVariable(variable)
-			if err != nil {
-				// Handle survey interrupts and cancellations as user cancellation
-				if isSurveyUserCancellation(err) {
-					os.Exit(0)
-				}
-				return nil, err
-			}
+		variablesToPrompt = append(variablesToPrompt, variable)
+	}
 
-			// Validate the value (using config for type-based validation)
-			if err := variable.ValidateWithConfig(value, p.config); err != nil {
-				fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-				fmt.Fprintln(os.Stderr, "Please try again.")
-				continue // Reprompt for this variable
-			}
+	// If no variables need prompting, return early
+	if len(variablesToPrompt) == 0 {
+		return values, nil
+	}
 
-			// Valid input - store it and move to next variable
-			values[variable.Name] = value
-			break
-		}
+	// Use the new form-based UI
+	promptedValues, err := p.promptVariablesForm(variablesToPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge prompted values with existing values
+	for key, value := range promptedValues {
+		values[key] = value
 	}
 
 	return values, nil
+}
+
+// promptVariablesForm creates a form UI showing all variables at once using huh
+func (p *Processor) promptVariablesForm(variables []models.Variable) (map[string]string, error) {
+	if len(variables) == 0 {
+		return make(map[string]string), nil
+	}
+
+	// Create value storage - huh needs pointers to bind values
+	valuePointers := make(map[string]*string)
+	boolValues := make(map[string]*bool)
+
+	for _, variable := range variables {
+		if variable.Type == "boolean" {
+			defaultBool := variable.DefaultValue == "true"
+			boolValues[variable.Name] = &defaultBool
+		} else {
+			defaultValue := variable.DefaultValue
+			valuePointers[variable.Name] = &defaultValue
+		}
+	}
+
+	// Build form fields
+	var fields []huh.Field
+
+	for _, variable := range variables {
+		// Build title
+		title := variable.Name
+		if variable.Description != "" {
+			title = fmt.Sprintf("%s (%s)", variable.Name, variable.Description)
+		}
+
+		// Handle different variable types
+		switch variable.Type {
+		case "boolean":
+			field := huh.NewConfirm().
+				Key(variable.Name).
+				Title(title).
+				Value(boolValues[variable.Name])
+			fields = append(fields, field)
+
+		default:
+			// Handle enum types with select
+			if variable.Validation != nil && len(variable.Validation.Enum) > 0 {
+				// Convert strings to huh options
+				var options []huh.Option[string]
+				for _, option := range variable.Validation.Enum {
+					options = append(options, huh.NewOption(option, option))
+				}
+
+				field := huh.NewSelect[string]().
+					Key(variable.Name).
+					Title(title).
+					Options(options...).
+					Value(valuePointers[variable.Name])
+				fields = append(fields, field)
+			} else {
+				// Regular string input with validation
+				field := huh.NewInput().
+					Key(variable.Name).
+					Title(title).
+					Value(valuePointers[variable.Name]).
+					Validate(func(str string) error {
+						return variable.ValidateWithConfig(str, p.config)
+					})
+				fields = append(fields, field)
+			}
+		}
+	}
+
+	// Create and run the form
+	form := huh.NewForm(
+		huh.NewGroup(fields...),
+	)
+
+	err := form.Run()
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert boolean values back to strings
+	result := make(map[string]string)
+	for _, variable := range variables {
+		if variable.Type == "boolean" {
+			if *boolValues[variable.Name] {
+				result[variable.Name] = "true"
+			} else {
+				result[variable.Name] = "false"
+			}
+		} else {
+			result[variable.Name] = *valuePointers[variable.Name]
+		}
+	}
+
+	return result, nil
 }
 
 // promptForVariable prompts for a single variable
