@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -139,8 +140,11 @@ func selectSnippetWithBubbleTea(snippets map[string]*models.Snippet) (string, er
 
 	model := newSelectorModel(snippets)
 
-	// Run without alternate screen to keep output inline
-	p := tea.NewProgram(model)
+	// Run with alternate screen for better UX
+	// Use stderr for the TUI so stdout can be captured for command output
+	p := tea.NewProgram(model,
+		tea.WithAltScreen(),
+		tea.WithOutput(os.Stderr))
 	finalModel, err := p.Run()
 	if err != nil {
 		return "", err

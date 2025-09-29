@@ -61,7 +61,8 @@ func (m confirmModel) View() string {
 func promptForConfirmation(message string) (bool, error) {
 	model := newConfirmModel(message)
 
-	p := tea.NewProgram(model)
+	// Use stderr for the TUI so stdout can be captured for command output
+	p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
 	finalModel, err := p.Run()
 	if err != nil {
 		return false, err

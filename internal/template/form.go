@@ -2,6 +2,7 @@ package template
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/samling/command-snippets/internal/models"
@@ -290,9 +291,11 @@ func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[s
 	// Create the form model
 	model := newFormModel(snippet, presetValues, config)
 
-	// Run the Bubble Tea program without alternate screen to avoid terminal issues
-	// This keeps the form inline with the command output
-	p := tea.NewProgram(model)
+	// Run the Bubble Tea program with alternate screen for better UX
+	// Use stderr for the TUI so stdout can be captured for the command output
+	p := tea.NewProgram(model,
+		tea.WithAltScreen(),
+		tea.WithOutput(os.Stderr))
 	finalModel, err := p.Run()
 	if err != nil {
 		return nil, fmt.Errorf("error running form: %w", err)
