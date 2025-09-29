@@ -7,7 +7,31 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/samling/command-snippets/internal/models"
+	"golang.org/x/term"
+)
+
+// Style definitions for the selector
+var (
+	titleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("205")).
+			Bold(true)
+
+	selectedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("86")).
+			Bold(true)
+
+	normalStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("247"))
+
+	scrollStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			Italic(true)
+
+	helpTextStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241"))
 )
 
 // selectorModel represents a snippet selector
@@ -92,7 +116,8 @@ func (m selectorModel) View() string {
 
 	var b strings.Builder
 
-	b.WriteString("Select a template to execute:\n\n")
+	b.WriteString(titleStyle.Render("Select a template to execute:"))
+	b.WriteString("\n\n")
 
 	// Show visible options (window of items around cursor)
 	windowSize := 10
@@ -111,23 +136,25 @@ func (m selectorModel) View() string {
 
 	// Show scroll indicator if needed
 	if start > 0 {
-		b.WriteString("  ...\n")
+		b.WriteString(scrollStyle.Render("  ...\n"))
 	}
 
 	for i := start; i < end; i++ {
-		cursor := "  "
 		if i == m.cursor {
-			cursor = "> "
+			b.WriteString(selectedStyle.Render("> " + m.options[i]))
+		} else {
+			b.WriteString(normalStyle.Render("  " + m.options[i]))
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", cursor, m.options[i]))
+		b.WriteString("\n")
 	}
 
 	// Show scroll indicator if needed
 	if end < len(m.options) {
-		b.WriteString("  ...\n")
+		b.WriteString(scrollStyle.Render("  ...\n"))
 	}
 
-	b.WriteString("\n↑/k: Up  ↓/j: Down  Enter: Select  q/Esc: Cancel")
+	b.WriteString("\n")
+	b.WriteString(helpTextStyle.Render("↑/k: Up  ↓/j: Down  Enter: Select  q/Esc: Cancel"))
 
 	return b.String()
 }
@@ -136,6 +163,13 @@ func (m selectorModel) View() string {
 func selectSnippetWithBubbleTea(snippets map[string]*models.Snippet) (string, error) {
 	if len(snippets) == 0 {
 		return "", fmt.Errorf("no templates found")
+	}
+
+	// Force color output when stderr is a TTY (even in subshells)
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		// Detect the best color profile for the terminal
+		output := termenv.NewOutput(os.Stderr)
+		lipgloss.SetColorProfile(output.Profile)
 	}
 
 	model := newSelectorModel(snippets)

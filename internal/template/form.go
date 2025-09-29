@@ -8,6 +8,31 @@ import (
 	"github.com/samling/command-snippets/internal/models"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+	"golang.org/x/term"
+)
+
+// Style definitions
+var (
+	focusedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("205")) // Pink/magenta for focused items
+
+	labelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")) // Gray for labels
+
+	selectedEnumStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("86")). // Cyan for selected enum
+				Bold(true)
+
+	unselectedEnumStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("247")) // Light gray for unselected enums
+
+	errorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")) // Red for errors
+
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")) // Gray for help text
 )
 
 // formField represents a single field in the form
@@ -229,10 +254,15 @@ func (m formModel) View() string {
 			label = fmt.Sprintf("%s (%s)", field.variable.Name, field.variable.Description)
 		}
 
-		// Focus indicator
-		focusIndicator := "  "
+		// Focus indicator and label styling
+		var linePrefix string
+		var styledLabel string
 		if i == m.focusIndex {
-			focusIndicator = "> "
+			linePrefix = focusedStyle.Render("> ")
+			styledLabel = focusedStyle.Render(label + ":")
+		} else {
+			linePrefix = "  "
+			styledLabel = labelStyle.Render(label + ":")
 		}
 
 		// Check if this is an enum field
@@ -242,29 +272,32 @@ func (m formModel) View() string {
 		var displayValue string
 		if isEnum {
 			// For enum fields, show all options horizontally with selection brackets
-			// We pad non-selected options with spaces to match the width with brackets
 			var options []string
 			for idx, opt := range field.enumOptions {
 				if idx == field.enumIndex {
-					// Current selection shown with angle brackets
-					options = append(options, "<"+opt+">")
+					// Current selection shown with angle brackets and color
+					options = append(options, selectedEnumStyle.Render("<"+opt+">"))
 				} else {
-					// Pad with spaces to match the width of brackets
-					options = append(options, " "+opt+" ")
+					// Unselected options with padding
+					options = append(options, unselectedEnumStyle.Render(" "+opt+" "))
 				}
 			}
 			displayValue = strings.Join(options, " ")
 		} else {
-			// For text fields, show the value (no cursor)
-			displayValue = field.value
+			// For text fields, show the value with appropriate styling
+			if i == m.focusIndex {
+				displayValue = focusedStyle.Render(field.value)
+			} else {
+				displayValue = field.value
+			}
 		}
 
 		// Build the line
-		b.WriteString(fmt.Sprintf("%s%s: %s", focusIndicator, label, displayValue))
+		b.WriteString(fmt.Sprintf("%s%s %s", linePrefix, styledLabel, displayValue))
 
 		// Add error message if present
 		if field.errorMessage != "" {
-			b.WriteString(fmt.Sprintf(" [Error: %s]", field.errorMessage))
+			b.WriteString(" " + errorStyle.Render("[Error: "+field.errorMessage+"]"))
 		}
 
 		b.WriteString("\n")
@@ -272,7 +305,7 @@ func (m formModel) View() string {
 
 	// Add instructions at the bottom
 	b.WriteString("\n")
-	b.WriteString("Tab/↑↓: Navigate fields  ←→: Select options  Enter: Submit  Esc: Cancel")
+	b.WriteString(helpStyle.Render("Tab/↑↓: Navigate fields  ←→: Select options  Enter: Submit  Esc: Cancel"))
 
 	return b.String()
 }
@@ -288,6 +321,13 @@ func (m formModel) getValues() map[string]string {
 
 // promptForVariablesWithBubbleTea shows a Bubble Tea form for all variables
 func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[string]string, config *models.Config) (map[string]string, error) {
+	// Force color output when stderr is a TTY (even in subshells)
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		// Detect the best color profile for the terminal
+		output := termenv.NewOutput(os.Stderr)
+		lipgloss.SetColorProfile(output.Profile)
+	}
+
 	// Create the form model
 	model := newFormModel(snippet, presetValues, config)
 

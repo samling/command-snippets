@@ -5,6 +5,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+	"golang.org/x/term"
 )
 
 // confirmModel represents a simple yes/no confirmation dialog
@@ -59,6 +62,13 @@ func (m confirmModel) View() string {
 
 // promptForConfirmation shows a yes/no confirmation dialog
 func promptForConfirmation(message string) (bool, error) {
+	// Force color output when stderr is a TTY (even in subshells)
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		// Detect the best color profile for the terminal
+		output := termenv.NewOutput(os.Stderr)
+		lipgloss.SetColorProfile(output.Profile)
+	}
+
 	model := newConfirmModel(message)
 
 	// Use stderr for the TUI so stdout can be captured for command output
