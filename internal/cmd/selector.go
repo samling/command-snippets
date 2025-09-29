@@ -139,7 +139,8 @@ func selectSnippetWithBubbleTea(snippets map[string]*models.Snippet) (string, er
 
 	model := newSelectorModel(snippets)
 
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	// Run without alternate screen to keep output inline
+	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
 	if err != nil {
 		return "", err

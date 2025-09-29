@@ -290,8 +290,9 @@ func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[s
 	// Create the form model
 	model := newFormModel(snippet, presetValues, config)
 
-	// Run the Bubble Tea program
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	// Run the Bubble Tea program without alternate screen to avoid terminal issues
+	// This keeps the form inline with the command output
+	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
 	if err != nil {
 		return nil, fmt.Errorf("error running form: %w", err)
