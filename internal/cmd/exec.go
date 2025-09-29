@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"syscall"
 
+	"github.com/samling/command-snippets/internal/models"
 	"github.com/samling/command-snippets/internal/template"
 
-	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -109,10 +108,16 @@ func selectSnippet(forceInternal bool) (string, error) {
 		return "", fmt.Errorf("no templates found")
 	}
 
-	// Build options for selection
+	// Build snippets map with pointers
+	snippetsMap := make(map[string]*models.Snippet)
+	for name, snippet := range config.Snippets {
+		s := snippet // Create a copy to get a pointer
+		snippetsMap[name] = &s
+	}
+
+	// Build options for external selector
 	var options []string
 	snippetMap := make(map[string]string)
-
 	for name, snippet := range config.Snippets {
 		displayName := name
 		if snippet.Description != "" {
@@ -121,13 +126,9 @@ func selectSnippet(forceInternal bool) (string, error) {
 		if len(snippet.Tags) > 0 {
 			displayName += fmt.Sprintf(" [%s]", strings.Join(snippet.Tags, ", "))
 		}
-
 		options = append(options, displayName)
 		snippetMap[displayName] = name
 	}
-
-	// Sort options alphabetically for consistent ordering
-	sort.Strings(options)
 
 	// Try external selector first (if configured and not forced to use internal)
 	if !forceInternal {
@@ -144,42 +145,8 @@ func selectSnippet(forceInternal bool) (string, error) {
 		// For other errors, we'll fall back to internal selector
 	}
 
-	// Fall back to internal selector
-	var selected string
-	prompt := &survey.Select{
-		Message: "Select a template to execute:",
-		Options: options,
-	}
-
-	// Get direct terminal access to work around stdout redirection
-	termIn, termOut, err := getTerminalIO()
-	if err != nil {
-		return "", fmt.Errorf("cannot access terminal: %w", err)
-	}
-
-	stdio := survey.WithStdio(termIn, termOut, termOut)
-
-	if err := survey.AskOne(prompt, &selected, stdio); err != nil {
-		// Handle survey interrupts and cancellations as user cancellation
-		if isSurveyUserCancellation(err) {
-			os.Exit(0)
-		}
-		return "", &UserCancellationError{"user cancelled selection"}
-	}
-
-	return snippetMap[selected], nil
-}
-
-// getTerminalIO returns file handles for direct terminal access
-// This ensures interactive prompts work even when stdout is redirected
-func getTerminalIO() (*os.File, *os.File, error) {
-	// Try to open /dev/tty for direct terminal access
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		// Fallback to stdin/stderr if /dev/tty is not available
-		return os.Stdin, os.Stderr, nil
-	}
-	return tty, tty, nil
+	// Use Bubble Tea selector
+	return selectSnippetWithBubbleTea(snippetsMap)
 }
 
 // tryExternalSelector attempts to use configured external selector (like fzf)
@@ -256,20 +223,6 @@ func (e *UserCancellationError) Error() string {
 func isUserCancellation(err error) bool {
 	_, ok := err.(*UserCancellationError)
 	return ok
-}
-
-// isSurveyUserCancellation checks if a survey error represents user cancellation
-func isSurveyUserCancellation(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-	// Common survey cancellation error messages
-	return errStr == "interrupt" ||
-		errStr == "terminal: interrupt" ||
-		strings.Contains(errStr, "interrupt") ||
-		strings.Contains(errStr, "EOF")
 }
 
 // parseSetValues parses --set values into a map

@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/samling/command-snippets/internal/models"
-
-	"github.com/AlecAivazis/survey/v2"
 )
 
 // ExecutionMode defines how commands should be executed
@@ -23,32 +21,6 @@ const (
 // Processor handles snippet template processing
 type Processor struct {
 	config *models.Config
-}
-
-// getTerminalIO returns file handles for direct terminal access
-// This ensures interactive prompts work even when stdout is redirected
-func getTerminalIO() (*os.File, *os.File, error) {
-	// Try to open /dev/tty for direct terminal access
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		// Fallback to stdin/stderr if /dev/tty is not available
-		return os.Stdin, os.Stderr, nil
-	}
-	return tty, tty, nil
-}
-
-// isSurveyUserCancellation checks if a survey error represents user cancellation
-func isSurveyUserCancellation(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-	// Common survey cancellation error messages
-	return errStr == "interrupt" ||
-		errStr == "terminal: interrupt" ||
-		strings.Contains(errStr, "interrupt") ||
-		strings.Contains(errStr, "EOF")
 }
 
 // NewProcessor creates a new template processor
@@ -91,22 +63,8 @@ func (p *Processor) ExecuteWithModeAndPresets(snippet *models.Snippet, mode Exec
 		// Show command with prefix, then ask for confirmation
 		fmt.Fprintf(os.Stderr, "Command: %s\n", command)
 
-		// Get direct terminal access for confirmation prompt
-		termIn, termOut, err := getTerminalIO()
+		confirm, err := promptForConfirmation("Execute this command?")
 		if err != nil {
-			return fmt.Errorf("cannot access terminal: %w", err)
-		}
-
-		confirm := false
-		prompt := &survey.Confirm{
-			Message: "Execute this command?",
-		}
-		stdio := survey.WithStdio(termIn, termOut, termOut)
-		if err := survey.AskOne(prompt, &confirm, stdio); err != nil {
-			// Handle survey interrupts and cancellations as user cancellation
-			if isSurveyUserCancellation(err) {
-				os.Exit(0)
-			}
 			return err
 		}
 		if !confirm {
@@ -132,142 +90,14 @@ func (p *Processor) ProcessSnippet(snippet *models.Snippet, values map[string]st
 
 // promptForVariables interactively prompts for snippet variables
 func (p *Processor) promptForVariables(snippet *models.Snippet) (map[string]string, error) {
-	values := make(map[string]string)
-
-	// Prompt for each variable defined in the snippet
-	for _, variable := range snippet.Variables {
-		if variable.Computed {
-			continue // Skip computed variables
-		}
-
-		// Loop until we get valid input
-		for {
-			value, err := p.promptForVariable(variable)
-			if err != nil {
-				// Handle survey interrupts and cancellations as user cancellation
-				if isSurveyUserCancellation(err) {
-					os.Exit(0)
-				}
-				return nil, err
-			}
-
-			// Validate the value (using config for type-based validation)
-			if err := variable.ValidateWithConfig(value, p.config); err != nil {
-				fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-				fmt.Fprintln(os.Stderr, "Please try again.")
-				continue // Reprompt for this variable
-			}
-
-			// Valid input - store it and move to next variable
-			values[variable.Name] = value
-			break
-		}
-	}
-
-	return values, nil
+	// Use Bubble Tea form for prompting
+	return promptForVariablesWithBubbleTea(snippet, nil, p.config)
 }
 
 // promptForVariablesWithPresets interactively prompts for snippet variables, using preset values where available
 func (p *Processor) promptForVariablesWithPresets(snippet *models.Snippet, presetValues map[string]string) (map[string]string, error) {
-	values := make(map[string]string)
-
-	// Initialize with preset values
-	if presetValues != nil {
-		for key, value := range presetValues {
-			values[key] = value
-		}
-	}
-
-	// Prompt for each variable defined in the snippet
-	for _, variable := range snippet.Variables {
-		if variable.Computed {
-			continue // Skip computed variables
-		}
-
-		// Skip if already set via --set
-		if _, exists := values[variable.Name]; exists {
-			// Validate the preset value
-			if err := variable.ValidateWithConfig(values[variable.Name], p.config); err != nil {
-				return nil, fmt.Errorf("preset value for '%s': %w", variable.Name, err)
-			}
-			continue
-		}
-
-		// Loop until we get valid input
-		for {
-			value, err := p.promptForVariable(variable)
-			if err != nil {
-				// Handle survey interrupts and cancellations as user cancellation
-				if isSurveyUserCancellation(err) {
-					os.Exit(0)
-				}
-				return nil, err
-			}
-
-			// Validate the value (using config for type-based validation)
-			if err := variable.ValidateWithConfig(value, p.config); err != nil {
-				fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-				fmt.Fprintln(os.Stderr, "Please try again.")
-				continue // Reprompt for this variable
-			}
-
-			// Valid input - store it and move to next variable
-			values[variable.Name] = value
-			break
-		}
-	}
-
-	return values, nil
-}
-
-// promptForVariable prompts for a single variable
-func (p *Processor) promptForVariable(variable models.Variable) (string, error) {
-	// Build prompt message
-	message := variable.Name
-	if variable.Description != "" {
-		message = fmt.Sprintf("%s (%s)", variable.Name, variable.Description)
-	}
-
-	// Get direct terminal access to work around stdout redirection
-	termIn, termOut, err := getTerminalIO()
-	if err != nil {
-		return "", fmt.Errorf("cannot access terminal: %w", err)
-	}
-
-	// Configure survey to use terminal directly
-	stdio := survey.WithStdio(termIn, termOut, termOut)
-
-	// Handle different variable types
-	switch variable.Type {
-	case "boolean":
-		confirm := false
-		prompt := &survey.Confirm{Message: message}
-		err := survey.AskOne(prompt, &confirm, stdio)
-		if confirm {
-			return "true", err
-		}
-		return "false", err
-
-	default:
-		// Regular string input
-		var value string
-		prompt := &survey.Input{
-			Message: message,
-			Default: variable.DefaultValue,
-		}
-
-		// Add validation for enum types
-		if variable.Validation != nil && len(variable.Validation.Enum) > 0 {
-			selectPrompt := &survey.Select{
-				Message: message,
-				Options: variable.Validation.Enum,
-				Default: variable.DefaultValue,
-			}
-			return value, survey.AskOne(selectPrompt, &value, stdio)
-		}
-
-		return value, survey.AskOne(prompt, &value, stdio)
-	}
+	// Use Bubble Tea form for prompting
+	return promptForVariablesWithBubbleTea(snippet, presetValues, p.config)
 }
 
 // executeCommand executes a shell command
