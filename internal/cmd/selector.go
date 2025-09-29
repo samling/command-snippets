@@ -47,10 +47,19 @@ type selectorModel struct {
 
 // newSelectorModel creates a new selector model
 func newSelectorModel(snippets map[string]*models.Snippet) selectorModel {
+	// First, get all snippet names and sort them
+	var names []string
+	for name := range snippets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	// Now build options in sorted order
 	var options []string
 	snippetMap := make(map[string]string)
 
-	for name, snippet := range snippets {
+	for _, name := range names {
+		snippet := snippets[name]
 		displayName := name
 		if snippet.Description != "" {
 			displayName = fmt.Sprintf("%s - %s", name, snippet.Description)
@@ -63,8 +72,7 @@ func newSelectorModel(snippets map[string]*models.Snippet) selectorModel {
 		snippetMap[displayName] = name
 	}
 
-	// Sort options alphabetically
-	sort.Strings(options)
+	// Options are already in sorted order since we sorted the names first
 
 	return selectorModel{
 		snippets:   snippets,
@@ -160,16 +168,19 @@ func (m selectorModel) View() string {
 }
 
 // selectSnippetWithBubbleTea shows an interactive snippet selector using Bubble Tea
-func selectSnippetWithBubbleTea(snippets map[string]*models.Snippet) (string, error) {
+func selectSnippetWithBubbleTea(snippets map[string]*models.Snippet, noColor bool) (string, error) {
 	if len(snippets) == 0 {
 		return "", fmt.Errorf("no templates found")
 	}
 
-	// Force color output when stderr is a TTY (even in subshells)
-	if term.IsTerminal(int(os.Stderr.Fd())) {
+	// Force color output when stderr is a TTY (even in subshells), unless --no-color
+	if !noColor && term.IsTerminal(int(os.Stderr.Fd())) {
 		// Detect the best color profile for the terminal
 		output := termenv.NewOutput(os.Stderr)
 		lipgloss.SetColorProfile(output.Profile)
+	} else if noColor {
+		// Disable colors
+		lipgloss.SetColorProfile(termenv.Ascii)
 	}
 
 	model := newSelectorModel(snippets)

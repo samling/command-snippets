@@ -13,6 +13,55 @@ import (
 	"golang.org/x/term"
 )
 
+// NoColor is a global flag to disable colors in the TUI
+var NoColor bool
+
+// wrapLine wraps a line to fit within the given width, indenting continuation lines
+func wrapLine(line string, width int, indent string) []string {
+	if width <= 0 || len(line) <= width {
+		return []string{line}
+	}
+
+	var result []string
+	remaining := line
+	firstLine := true
+
+	for len(remaining) > 0 {
+		availWidth := width
+		if !firstLine {
+			availWidth = width - len(indent)
+		}
+
+		if len(remaining) <= availWidth {
+			if firstLine {
+				result = append(result, remaining)
+			} else {
+				result = append(result, indent+remaining)
+			}
+			break
+		}
+
+		// Find a good break point (space, comma, etc.)
+		breakPoint := availWidth
+		for i := availWidth - 1; i > availWidth/2; i-- {
+			if remaining[i] == ' ' || remaining[i] == ',' || remaining[i] == '-' {
+				breakPoint = i + 1
+				break
+			}
+		}
+
+		if firstLine {
+			result = append(result, remaining[:breakPoint])
+			firstLine = false
+		} else {
+			result = append(result, indent+remaining[:breakPoint])
+		}
+		remaining = strings.TrimSpace(remaining[breakPoint:])
+	}
+
+	return result
+}
+
 // Style definitions
 var (
 	focusedStyle = lipgloss.NewStyle().
@@ -124,15 +173,24 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		currentField := &m.fields[m.focusIndex]
 		isEnum := len(currentField.enumOptions) > 0
 
-		// Check for paste event - Bubble Tea sends pastes as regular key messages
-		// with multiple characters
+		// Handle bracketed paste - it comes through as "[" + content + "]"
 		keyStr := msg.String()
+
+		// Check if this is bracketed paste content
+		if !isEnum && strings.HasPrefix(keyStr, "[") && strings.HasSuffix(keyStr, "]") && len(keyStr) > 2 {
+			// This is bracketed paste - extract the content between brackets
+			pastedContent := keyStr[1 : len(keyStr)-1]
+			currentField.value += pastedContent
+			return m, nil
+		}
+
+		// Check for regular multi-character paste (without brackets)
 		if !isEnum && len(keyStr) > 1 && !strings.HasPrefix(keyStr, "ctrl+") &&
 			!strings.HasPrefix(keyStr, "alt+") && !strings.HasPrefix(keyStr, "shift+") &&
 			keyStr != "tab" && keyStr != "enter" && keyStr != "backspace" &&
 			keyStr != "up" && keyStr != "down" && keyStr != "left" && keyStr != "right" &&
 			keyStr != "esc" {
-			// This is likely pasted content
+			// This is likely pasted content without brackets
 			currentField.value += keyStr
 			return m, nil
 		}
@@ -246,6 +304,14 @@ func (m formModel) View() string {
 
 	var b strings.Builder
 
+	// Create a style with max width if we have terminal width
+	var contentStyle lipgloss.Style
+	if m.width > 0 {
+		contentStyle = lipgloss.NewStyle().MaxWidth(m.width)
+	} else {
+		contentStyle = lipgloss.NewStyle()
+	}
+
 	// Render each field
 	for i, field := range m.fields {
 		// Field label
@@ -284,30 +350,48 @@ func (m formModel) View() string {
 			}
 			displayValue = strings.Join(options, " ")
 		} else {
-			// For text fields, show the value with appropriate styling
-			if i == m.focusIndex {
-				displayValue = focusedStyle.Render(field.value)
-			} else {
-				displayValue = field.value
-			}
+			// For text fields, just show the value without styling (will be white when focused)
+			displayValue = field.value
 		}
 
 		// Build the line
-		b.WriteString(fmt.Sprintf("%s%s %s", linePrefix, styledLabel, displayValue))
+		line := fmt.Sprintf("%s%s %s", linePrefix, styledLabel, displayValue)
+
+		// Use Lip Gloss to handle wrapping if width is set
+		if m.width > 0 {
+			// Wrap the line at terminal width
+			wrappedLine := lipgloss.NewStyle().Width(m.width).Render(line)
+			b.WriteString(wrappedLine)
+			b.WriteString("\n")
+		} else {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
 
 		// Add error message if present
 		if field.errorMessage != "" {
-			b.WriteString(" " + errorStyle.Render("[Error: "+field.errorMessage+"]"))
+			errorLine := "    " + errorStyle.Render("[Error: "+field.errorMessage+"]")
+			if m.width > 0 {
+				errorLine = lipgloss.NewStyle().Width(m.width).Render(errorLine)
+			}
+			b.WriteString(errorLine + "\n")
 		}
-
-		b.WriteString("\n")
 	}
 
 	// Add instructions at the bottom
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("Tab/↑↓: Navigate fields  ←→: Select options  Enter: Submit  Esc: Cancel"))
+	helpText := helpStyle.Render("Tab/↑↓: Navigate fields  ←→: Select options  Enter: Submit  Esc: Cancel")
+	if m.width > 0 {
+		helpText = lipgloss.NewStyle().Width(m.width).Render(helpText)
+	}
+	b.WriteString(helpText)
 
-	return b.String()
+	// Apply the overall width constraint
+	output := b.String()
+	if m.width > 0 {
+		return contentStyle.Render(output)
+	}
+	return output
 }
 
 // getValues returns the form values as a map
@@ -321,15 +405,25 @@ func (m formModel) getValues() map[string]string {
 
 // promptForVariablesWithBubbleTea shows a Bubble Tea form for all variables
 func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[string]string, config *models.Config) (map[string]string, error) {
-	// Force color output when stderr is a TTY (even in subshells)
-	if term.IsTerminal(int(os.Stderr.Fd())) {
+	// Force color output when stderr is a TTY (even in subshells), unless --no-color
+	if !NoColor && term.IsTerminal(int(os.Stderr.Fd())) {
 		// Detect the best color profile for the terminal
 		output := termenv.NewOutput(os.Stderr)
 		lipgloss.SetColorProfile(output.Profile)
+	} else if NoColor {
+		// Disable colors
+		lipgloss.SetColorProfile(termenv.Ascii)
+	}
+
+	// Get terminal width for wrapping
+	width, _, _ := term.GetSize(int(os.Stderr.Fd()))
+	if width == 0 {
+		width = 80 // Default width
 	}
 
 	// Create the form model
 	model := newFormModel(snippet, presetValues, config)
+	model.width = width
 
 	// Run the Bubble Tea program with alternate screen for better UX
 	// Use stderr for the TUI so stdout can be captured for the command output
