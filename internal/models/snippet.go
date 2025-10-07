@@ -243,6 +243,15 @@ func (v *Variable) ValidateWithConfig(value string, config *Config) error {
 		return nil
 	}
 
+	// Special handling for regex type - validate that the value is a valid regex pattern
+	if v.Type == "regex" {
+		_, err := regexp.Compile(value)
+		if err != nil {
+			return fmt.Errorf("variable %s must be a valid regular expression: %v", v.Name, err)
+		}
+		return nil
+	}
+
 	// Type-based validation using variable_types from config
 	if v.Type != "" && config != nil {
 		if varType, exists := config.VariableTypes[v.Type]; exists {
