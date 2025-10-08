@@ -1,0 +1,33 @@
+transform_templates:
+  # Test namespace transformation with conditional logic
+  test-namespace:
+    description: "Test namespace transformation"
+    transform:
+      empty_value: ""
+      value_pattern: |
+        {{- if eq .Value "all" -}}
+          -A
+        {{- else -}}
+          -n {{.Value}}
+        {{- end -}}
+
+  # Test port mapping transformation
+  test-port-mapping:
+    description: "Test port mapping transformation"
+    transform:
+      empty_value: ""
+      value_pattern: "-p {{.Value}}:{{.Value}}"
+
+  # Test boolean flag transformation
+  test-boolean-flag:
+    description: "Test boolean flag transformation"
+    transform:
+      true_value: "--verbose"
+      false_value: ""
+
+  # Test simple prefix pattern
+  test-prefix:
+    description: "Test simple prefix pattern"
+    transform:
+      empty_value: ""
+      value_pattern: "--prefix={{.Value}}"
