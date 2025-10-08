@@ -1,0 +1,33 @@
+variable_types:
+  # Port number with range validation
+  test_port:
+    description: "Test port number"
+    validation:
+      range: [1, 65535]
+    default: "8080"
+
+  # Enum validation for log levels
+  test_log_level:
+    description: "Test log level"
+    validation:
+      enum: ["debug", "info", "warn", "error"]
+    default: "info"
+
+  # Enum validation for environments
+  test_environment:
+    description: "Test environment"
+    validation:
+      enum: ["dev", "staging", "prod"]
+
+  # Pattern validation for email
+  test_email:
+    description: "Test email address"
+    validation:
+      pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+
+  # Pattern validation for version
+  test_version:
+    description: "Test semantic version"
+    validation:
+      pattern: "^v?\\d+\\.\\d+\\.\\d+$"
+    default: "1.0.0"

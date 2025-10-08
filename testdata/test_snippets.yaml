@@ -1,0 +1,349 @@
+snippets:
+  # Test 1: Simple snippet with no variables
+  simple-no-vars:
+    id: "simple-no-vars"
+    name: "simple-no-vars"
+    description: "Simple command with no variables"
+    command: "echo Hello World"
+    tags: ["test", "simple"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 2: Simple snippet with basic variable substitution
+  simple-with-vars:
+    id: "simple-with-vars"
+    name: "simple-with-vars"
+    description: "Simple command with basic variables"
+    command: "echo <message> <name>"
+    variables:
+      - name: "message"
+        description: "Message to display"
+        required: true
+      - name: "name"
+        description: "Name to greet"
+        default: "World"
+    tags: ["test", "simple"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 3: Snippet with default values
+  snippet-with-defaults:
+    id: "snippet-with-defaults"
+    name: "snippet-with-defaults"
+    description: "Command with default values"
+    command: "curl <url> <timeout>"
+    variables:
+      - name: "url"
+        description: "URL to fetch"
+        required: true
+      - name: "timeout"
+        description: "Request timeout in seconds"
+        default: "30"
+    tags: ["test", "defaults"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 4: Snippet with type validation (enum)
+  snippet-with-enum:
+    id: "snippet-with-enum"
+    name: "snippet-with-enum"
+    description: "Command with enum validation"
+    command: "app --log-level <log_level>"
+    variables:
+      - name: "log_level"
+        description: "Log level"
+        type: "test_log_level"
+        default: "info"
+    tags: ["test", "validation", "enum"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 5: Snippet with range validation
+  snippet-with-range:
+    id: "snippet-with-range"
+    name: "snippet-with-range"
+    description: "Command with range validation"
+    command: "server --port <port>"
+    variables:
+      - name: "port"
+        description: "Server port"
+        type: "test_port"
+        default: "8080"
+    tags: ["test", "validation", "range"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 6: Snippet with pattern validation
+  snippet-with-pattern:
+    id: "snippet-with-pattern"
+    name: "snippet-with-pattern"
+    description: "Command with pattern validation"
+    command: "deploy --version <version>"
+    variables:
+      - name: "version"
+        description: "Version to deploy"
+        type: "test_version"
+        default: "1.0.0"
+    tags: ["test", "validation", "pattern"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 7: Snippet with inline pattern validation
+  snippet-with-inline-pattern:
+    id: "snippet-with-inline-pattern"
+    name: "snippet-with-inline-pattern"
+    description: "Command with inline pattern validation"
+    command: "notify --email <email>"
+    variables:
+      - name: "email"
+        description: "Email address"
+        required: true
+        validation:
+          pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+    tags: ["test", "validation", "pattern", "inline"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 8: Snippet with boolean transformation
+  snippet-with-boolean:
+    id: "snippet-with-boolean"
+    name: "snippet-with-boolean"
+    description: "Command with boolean transformation"
+    command: "app <verbose> <debug>"
+    variables:
+      - name: "verbose"
+        description: "Enable verbose output"
+        type: "boolean"
+        default: "false"
+        transform:
+          true_value: "--verbose"
+          false_value: ""
+      - name: "debug"
+        description: "Enable debug mode"
+        type: "boolean"
+        default: "false"
+        transform:
+          true_value: "-d"
+          false_value: ""
+    tags: ["test", "boolean", "transform"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 9: Snippet with transform template
+  snippet-with-transform-template:
+    id: "snippet-with-transform-template"
+    name: "snippet-with-transform-template"
+    description: "Command using transform template"
+    command: "kubectl get pods <namespace>"
+    variables:
+      - name: "namespace"
+        description: "Kubernetes namespace"
+        transformTemplate: "test-namespace"
+    tags: ["test", "transform", "template"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 10: Snippet with inline value pattern transform
+  snippet-with-value-pattern:
+    id: "snippet-with-value-pattern"
+    name: "snippet-with-value-pattern"
+    description: "Command with inline value pattern transform"
+    command: "app <output_format>"
+    variables:
+      - name: "output_format"
+        description: "Output format"
+        default: ""
+        transform:
+          empty_value: ""
+          value_pattern: "--format={{.Value}}"
+    tags: ["test", "transform", "pattern"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 11: Snippet with empty value transformation
+  snippet-with-empty-value:
+    id: "snippet-with-empty-value"
+    name: "snippet-with-empty-value"
+    description: "Command with empty value transformation"
+    command: "app <optional_flag>"
+    variables:
+      - name: "optional_flag"
+        description: "Optional flag value"
+        default: ""
+        transform:
+          empty_value: ""
+          value_pattern: "--flag={{.Value}}"
+    tags: ["test", "transform", "empty"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 12: Snippet with computed variable (simple compose)
+  snippet-with-computed-simple:
+    id: "snippet-with-computed-simple"
+    name: "snippet-with-computed-simple"
+    description: "Command with simple computed variable"
+    command: "app <resource>"
+    variables:
+      - name: "resource_type"
+        description: "Resource type"
+        required: true
+        default: "pod"
+      - name: "resource_name"
+        description: "Resource name"
+        required: true
+      - name: "resource"
+        description: "Full resource identifier"
+        computed: true
+        transform:
+          compose: "{{.resource_type}}/{{.resource_name}}"
+    tags: ["test", "computed", "compose"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 13: Snippet with computed variable (conditional compose)
+  snippet-with-computed-conditional:
+    id: "snippet-with-computed-conditional"
+    name: "snippet-with-computed-conditional"
+    description: "Command with conditional computed variable"
+    command: "server <port_mapping>"
+    variables:
+      - name: "host_port"
+        description: "Host port"
+        required: true
+      - name: "target_port"
+        description: "Target port (empty to use host port)"
+        default: ""
+      - name: "port_mapping"
+        description: "Complete port mapping"
+        computed: true
+        transform:
+          compose: |
+            {{- .host_port -}}:
+            {{- if .target_port -}}
+              {{- .target_port -}}
+            {{- else -}}
+              {{- .host_port -}}
+            {{- end -}}
+    tags: ["test", "computed", "conditional"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 14: Snippet with multiple transforms
+  snippet-with-multiple-transforms:
+    id: "snippet-with-multiple-transforms"
+    name: "snippet-with-multiple-transforms"
+    description: "Command with multiple transform types"
+    command: "kubectl get pods <namespace> <output> <show_labels>"
+    variables:
+      - name: "namespace"
+        description: "Namespace"
+        transformTemplate: "test-namespace"
+      - name: "output"
+        description: "Output format"
+        default: ""
+        validation:
+          enum: ["", "wide", "yaml", "json"]
+        transform:
+          empty_value: ""
+          value_pattern: "-o {{.Value}}"
+      - name: "show_labels"
+        description: "Show labels"
+        type: "boolean"
+        default: "false"
+        transform:
+          true_value: "--show-labels"
+          false_value: ""
+    tags: ["test", "multiple", "transform"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 15: Snippet with complex computed variable
+  snippet-with-complex-computed:
+    id: "snippet-with-complex-computed"
+    name: "snippet-with-complex-computed"
+    description: "Command with complex computed variable"
+    command: "docker run <docker_args> <image_name>"
+    variables:
+      - name: "image_name"
+        description: "Docker image name"
+        required: true
+      - name: "port"
+        description: "Port to expose"
+        default: ""
+      - name: "volume"
+        description: "Volume to mount"
+        default: ""
+      - name: "detach"
+        description: "Run in detached mode"
+        type: "boolean"
+        default: "false"
+      - name: "docker_args"
+        description: "Complete docker arguments"
+        computed: true
+        transform:
+          compose: |
+            {{- if eq .detach "true" -}}-d {{end -}}
+            {{- if .port -}}-p {{.port}} {{end -}}
+            {{- if .volume -}}-v {{.volume}} {{end -}}
+    tags: ["test", "computed", "complex"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 16: Snippet with regex type validation
+  snippet-with-regex-type:
+    id: "snippet-with-regex-type"
+    name: "snippet-with-regex-type"
+    description: "Command that takes a regex pattern"
+    command: "grep <pattern> file.txt"
+    variables:
+      - name: "pattern"
+        description: "Regex pattern to search"
+        type: "regex"
+        required: true
+    tags: ["test", "regex", "validation"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
+  # Test 17: Snippet with all variable features combined
+  snippet-with-all-features:
+    id: "snippet-with-all-features"
+    name: "snippet-with-all-features"
+    description: "Command exercising all variable features"
+    command: "complex-app <full_config> <extra_args>"
+    variables:
+      - name: "environment"
+        description: "Environment"
+        type: "test_environment"
+        required: true
+      - name: "port"
+        description: "Application port"
+        type: "test_port"
+      - name: "verbose"
+        description: "Enable verbose logging"
+        type: "boolean"
+        default: "false"
+      - name: "full_config"
+        description: "Complete configuration"
+        computed: true
+        transform:
+          compose: "--env={{.environment}} --port={{.port}}"
+      - name: "log_level"
+        description: "Log level"
+        type: "test_log_level"
+      - name: "extra_flag"
+        description: "Extra optional flag"
+        default: ""
+        transform:
+          empty_value: ""
+          value_pattern: "--extra={{.Value}}"
+      - name: "extra_args"
+        description: "Extra arguments"
+        computed: true
+        transform:
+          compose: |
+            {{- if eq .verbose "true" -}}--verbose {{end -}}
+            {{- if .log_level -}}--log={{.log_level}} {{end -}}
+            {{- if .extra_flag -}}{{.extra_flag}}{{end -}}
+    tags: ["test", "comprehensive"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
