@@ -16,52 +16,6 @@ import (
 // NoColor is a global flag to disable colors in the TUI
 var NoColor bool
 
-// wrapLine wraps a line to fit within the given width, indenting continuation lines
-func wrapLine(line string, width int, indent string) []string {
-	if width <= 0 || len(line) <= width {
-		return []string{line}
-	}
-
-	var result []string
-	remaining := line
-	firstLine := true
-
-	for len(remaining) > 0 {
-		availWidth := width
-		if !firstLine {
-			availWidth = width - len(indent)
-		}
-
-		if len(remaining) <= availWidth {
-			if firstLine {
-				result = append(result, remaining)
-			} else {
-				result = append(result, indent+remaining)
-			}
-			break
-		}
-
-		// Find a good break point (space, comma, etc.)
-		breakPoint := availWidth
-		for i := availWidth - 1; i > availWidth/2; i-- {
-			if remaining[i] == ' ' || remaining[i] == ',' || remaining[i] == '-' {
-				breakPoint = i + 1
-				break
-			}
-		}
-
-		if firstLine {
-			result = append(result, remaining[:breakPoint])
-			firstLine = false
-		} else {
-			result = append(result, indent+remaining[:breakPoint])
-		}
-		remaining = strings.TrimSpace(remaining[breakPoint:])
-	}
-
-	return result
-}
-
 // Style definitions
 var (
 	focusedStyle = lipgloss.NewStyle().
