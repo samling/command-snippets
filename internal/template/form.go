@@ -17,6 +17,40 @@ import (
 // NoColor is a global flag to disable colors in the TUI
 var NoColor bool
 
+// wrapLines takes a slice of lines and wraps any that exceed the given width
+func wrapLines(lines []string, maxWidth int) []string {
+	var wrapped []string
+	for _, line := range lines {
+		// Manually wrap lines that exceed the width
+		if len(line) > maxWidth {
+			// Wrap this line
+			for len(line) > 0 {
+				if len(line) <= maxWidth {
+					wrapped = append(wrapped, line)
+					break
+				}
+				// Find a good break point (prefer spaces)
+				breakPoint := maxWidth
+				if breakPoint > len(line) {
+					breakPoint = len(line)
+				}
+				// Try to break at a space
+				for i := breakPoint - 1; i > breakPoint-20 && i > 0; i-- {
+					if line[i] == ' ' {
+						breakPoint = i
+						break
+					}
+				}
+				wrapped = append(wrapped, line[:breakPoint])
+				line = strings.TrimLeft(line[breakPoint:], " ")
+			}
+		} else {
+			wrapped = append(wrapped, line)
+		}
+	}
+	return wrapped
+}
+
 // Style definitions
 var (
 	focusedStyle = lipgloss.NewStyle().
@@ -247,10 +281,19 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+d":
 			// Scroll regex pane down (show later content)
-			if currentField.variable.Type == "regex" && currentField.value != "" && m.showRegexPane && m.height > 0 {
+			if currentField.variable.Type == "regex" && currentField.value != "" && m.showRegexPane && m.height > 0 && m.width >= 100 {
 				// Calculate max scroll to prevent scrolling past content
+				// Must use same calculation as View()
+				formWidth := int(float64(m.width) * 0.6)
+				if formWidth < 60 {
+					formWidth = 60
+				}
+				explanationWidth := m.width - formWidth - 2
+
 				explanation := regex.ExplainRegexPattern(currentField.value)
-				explanationLines := strings.Split(strings.TrimRight(explanation, "\n"), "\n")
+				rawLines := strings.Split(strings.TrimRight(explanation, "\n"), "\n")
+				explanationLines := wrapLines(rawLines, explanationWidth-4)
+
 				maxContentLines := m.height - 5 // Must match View() calculation
 				if maxContentLines < 5 {
 					maxContentLines = 5
@@ -627,8 +670,9 @@ func (m formModel) View() string {
 	if showPane && regexExplanation != "" {
 		explanationWidth := m.width - formWidth - 2 // 2 for padding/border
 
-		// Split explanation into lines for scrolling
-		explanationLines := strings.Split(strings.TrimRight(regexExplanation, "\n"), "\n")
+		// Split explanation into lines and wrap them to fit the pane width
+		rawLines := strings.Split(strings.TrimRight(regexExplanation, "\n"), "\n")
+		explanationLines := wrapLines(rawLines, explanationWidth-4)
 
 		// Calculate the maximum height available for the pane content
 		// The pane should be the FULL terminal height since it's side-by-side with the form
