@@ -29,6 +29,8 @@ go install github.com/samling/command-snippets/cmd/cs@latest
 
 **Note:** The `snippets/` directory in this repository contains example snippet files that you can use as reference for creating your own templates.
 
+**Want to create your own snippets?** See the **[Snippet Creation Guide](SNIPPET_GUIDE.md)** for comprehensive documentation on creating command templates with variables, transformations, and validation.
+
 ### Basic Usage
 
 ```bash
@@ -286,6 +288,18 @@ snippets:
 - **Flexibility**: Mix and match snippet collections for different projects
 - **Version Control**: Track changes to specific command categories separately
 - **Project Context**: Local `.csnippets` files provide project-specific commands
+
+## Creating Snippets
+
+For comprehensive documentation on creating snippets, see the **[Snippet Creation Guide](SNIPPET_GUIDE.md)**.
+
+The guide covers:
+- How to create snippets and variables
+- All variable fields and options
+- Transformations and transform templates
+- Computed variables
+- Validation rules
+- Advanced examples and best practices
 
 ## Core Concepts
 
