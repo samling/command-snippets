@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/samling/command-snippets/internal/models"
+	"github.com/samling/command-snippets/internal/regex"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -15,52 +16,6 @@ import (
 
 // NoColor is a global flag to disable colors in the TUI
 var NoColor bool
-
-// wrapLine wraps a line to fit within the given width, indenting continuation lines
-func wrapLine(line string, width int, indent string) []string {
-	if width <= 0 || len(line) <= width {
-		return []string{line}
-	}
-
-	var result []string
-	remaining := line
-	firstLine := true
-
-	for len(remaining) > 0 {
-		availWidth := width
-		if !firstLine {
-			availWidth = width - len(indent)
-		}
-
-		if len(remaining) <= availWidth {
-			if firstLine {
-				result = append(result, remaining)
-			} else {
-				result = append(result, indent+remaining)
-			}
-			break
-		}
-
-		// Find a good break point (space, comma, etc.)
-		breakPoint := availWidth
-		for i := availWidth - 1; i > availWidth/2; i-- {
-			if remaining[i] == ' ' || remaining[i] == ',' || remaining[i] == '-' {
-				breakPoint = i + 1
-				break
-			}
-		}
-
-		if firstLine {
-			result = append(result, remaining[:breakPoint])
-			firstLine = false
-		} else {
-			result = append(result, indent+remaining[:breakPoint])
-		}
-		remaining = strings.TrimSpace(remaining[breakPoint:])
-	}
-
-	return result
-}
 
 // Style definitions
 var (
@@ -82,6 +37,16 @@ var (
 
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")) // Gray for help text
+
+	regexExplanationStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("245")).
+				BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("240")).
+				Padding(0, 1)
+
+	regexTitleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true)
 )
 
 // formField represents a single field in the form
@@ -96,13 +61,15 @@ type formField struct {
 
 // formModel represents the state of the form
 type formModel struct {
-	fields     []formField
-	focusIndex int
-	done       bool
-	cancelled  bool
-	config     *models.Config
-	width      int
-	height     int
+	fields            []formField
+	focusIndex        int
+	done              bool
+	cancelled         bool
+	config            *models.Config
+	width             int
+	height            int
+	showRegexPane     bool // Whether to show regex explanation pane
+	regexPaneScrollUp int  // Number of lines scrolled up in regex pane
 }
 
 // newFormModel creates a new form model for the given snippet
@@ -169,9 +136,10 @@ func newFormModel(snippet *models.Snippet, presetValues map[string]string, confi
 	}
 
 	return formModel{
-		fields:     fields,
-		focusIndex: 0,
-		config:     config,
+		fields:        fields,
+		focusIndex:    0,
+		config:        config,
+		showRegexPane: true, // Show regex pane by default
 	}
 }
 
@@ -210,6 +178,10 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
 	case tea.KeyMsg:
 		currentField := &m.fields[m.focusIndex]
 		isEnum := len(currentField.enumOptions) > 0
@@ -233,6 +205,8 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Insert at cursor position
 			currentField.value = currentField.value[:currentField.cursorPos] + pastedContent + currentField.value[currentField.cursorPos:]
 			currentField.cursorPos += len(pastedContent)
+			// Reset scroll when pasting
+			m.regexPaneScrollUp = 0
 			return m, nil
 		}
 
@@ -246,6 +220,8 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Insert at cursor position
 			currentField.value = currentField.value[:currentField.cursorPos] + keyStr + currentField.value[currentField.cursorPos:]
 			currentField.cursorPos += len(keyStr)
+			// Reset scroll when pasting
+			m.regexPaneScrollUp = 0
 			return m, nil
 		}
 
@@ -254,35 +230,81 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancelled = true
 			return m, tea.Quit
 
-		case "tab", "down":
-			// Always move to next field
-			if m.focusIndex < len(m.fields)-1 {
-				m.focusIndex++
-				// Set cursor to end of new field's value
-				newField := &m.fields[m.focusIndex]
-				if len(newField.enumOptions) == 0 {
-					newField.cursorPos = len(newField.value)
-					// Safety check
-					if newField.cursorPos < 0 {
-						newField.cursorPos = 0
-					}
+		case "ctrl+r":
+			// Toggle regex pane visibility
+			m.showRegexPane = !m.showRegexPane
+			m.regexPaneScrollUp = 0 // Reset scroll when toggling
+
+		case "ctrl+u":
+			// Scroll regex pane up (show earlier content)
+			if currentField.variable.Type == "regex" && currentField.value != "" && m.showRegexPane {
+				m.regexPaneScrollUp -= 5
+				if m.regexPaneScrollUp < 0 {
+					m.regexPaneScrollUp = 0
 				}
+				return m, nil // Consume the event to prevent default scrolling
 			}
 
-		case "shift+tab", "up":
-			// Always move to previous field
-			if m.focusIndex > 0 {
-				m.focusIndex--
-				// Set cursor to end of new field's value
-				newField := &m.fields[m.focusIndex]
-				if len(newField.enumOptions) == 0 {
-					newField.cursorPos = len(newField.value)
-					// Safety check
-					if newField.cursorPos < 0 {
-						newField.cursorPos = 0
+		case "ctrl+d":
+			// Scroll regex pane down (show later content)
+			if currentField.variable.Type == "regex" && currentField.value != "" && m.showRegexPane && m.height > 0 {
+				// Calculate max scroll to prevent scrolling past content
+				explanation := regex.ExplainRegexPattern(currentField.value)
+				explanationLines := strings.Split(strings.TrimRight(explanation, "\n"), "\n")
+				maxContentLines := m.height - 5 // Must match View() calculation
+				if maxContentLines < 5 {
+					maxContentLines = 5
+				}
+				maxScroll := len(explanationLines) - maxContentLines
+				if maxScroll < 0 {
+					maxScroll = 0
+				}
+
+				// Only increment if we're not already at max
+				if m.regexPaneScrollUp < maxScroll {
+					m.regexPaneScrollUp += 5
+					if m.regexPaneScrollUp > maxScroll {
+						m.regexPaneScrollUp = maxScroll
 					}
 				}
+				return m, nil // Consume the event to prevent default scrolling
 			}
+
+		case "tab", "down":
+			// Move to next field, wrap around to top
+			m.focusIndex++
+			if m.focusIndex >= len(m.fields) {
+				m.focusIndex = 0
+			}
+			// Set cursor to end of new field's value
+			newField := &m.fields[m.focusIndex]
+			if len(newField.enumOptions) == 0 {
+				newField.cursorPos = len(newField.value)
+				// Safety check
+				if newField.cursorPos < 0 {
+					newField.cursorPos = 0
+				}
+			}
+			// Reset scroll when changing fields
+			m.regexPaneScrollUp = 0
+
+		case "shift+tab", "up":
+			// Move to previous field, wrap around to bottom
+			m.focusIndex--
+			if m.focusIndex < 0 {
+				m.focusIndex = len(m.fields) - 1
+			}
+			// Set cursor to end of new field's value
+			newField := &m.fields[m.focusIndex]
+			if len(newField.enumOptions) == 0 {
+				newField.cursorPos = len(newField.value)
+				// Safety check
+				if newField.cursorPos < 0 {
+					newField.cursorPos = 0
+				}
+			}
+			// Reset scroll when changing fields
+			m.regexPaneScrollUp = 0
 
 		case "left":
 			if isEnum {
@@ -341,12 +363,16 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Delete character before cursor
 				currentField.value = currentField.value[:currentField.cursorPos-1] + currentField.value[currentField.cursorPos:]
 				currentField.cursorPos--
+				// Reset scroll when modifying content
+				m.regexPaneScrollUp = 0
 			}
 
 		case "delete":
 			// Delete character at cursor position
 			if !isEnum && currentField.cursorPos < len(currentField.value) {
 				currentField.value = currentField.value[:currentField.cursorPos] + currentField.value[currentField.cursorPos+1:]
+				// Reset scroll when modifying content
+				m.regexPaneScrollUp = 0
 			}
 
 		case "home", "ctrl+a":
@@ -361,17 +387,21 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				currentField.cursorPos = len(currentField.value)
 			}
 
-		case "ctrl+u":
-			// Clear the current field (Unix-style line clear)
+		case "ctrl+x":
+			// Clear the current field
 			if !isEnum {
 				currentField.value = ""
 				currentField.cursorPos = 0
+				// Reset scroll when modifying content
+				m.regexPaneScrollUp = 0
 			}
 
-		case "ctrl+k":
-			// Delete from cursor to end of line
+		case "ctrl+y":
+			// Delete from cursor to end of line (rebind from ctrl+k)
 			if !isEnum && currentField.cursorPos < len(currentField.value) {
 				currentField.value = currentField.value[:currentField.cursorPos]
+				// Reset scroll when modifying content
+				m.regexPaneScrollUp = 0
 			}
 
 		case "ctrl+w":
@@ -387,6 +417,8 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				currentField.value = currentField.value[:wordStart] + currentField.value[currentField.cursorPos:]
 				currentField.cursorPos = wordStart
+				// Reset scroll when modifying content
+				m.regexPaneScrollUp = 0
 			}
 
 		default:
@@ -395,12 +427,10 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Insert character at cursor position
 				currentField.value = currentField.value[:currentField.cursorPos] + msg.String() + currentField.value[currentField.cursorPos:]
 				currentField.cursorPos++
+				// Reset scroll when typing
+				m.regexPaneScrollUp = 0
 			}
 		}
-
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
 	}
 
 	return m, nil
@@ -412,19 +442,10 @@ func (m formModel) View() string {
 		return ""
 	}
 
-	var b strings.Builder
-
-	// Create a style with max width if we have terminal width
-	var contentStyle lipgloss.Style
-	if m.width > 0 {
-		contentStyle = lipgloss.NewStyle().MaxWidth(m.width)
-	} else {
-		contentStyle = lipgloss.NewStyle()
-	}
-
 	// Safety check: this shouldn't happen anymore since we skip the form for no variables
 	// but keep it for defensive programming
 	if len(m.fields) == 0 {
+		var b strings.Builder
 		b.WriteString("No variables to configure.\n")
 		b.WriteString("\n")
 		helpText := helpStyle.Render("Enter: Execute  Esc: Cancel")
@@ -432,14 +453,35 @@ func (m formModel) View() string {
 			helpText = lipgloss.NewStyle().Width(m.width).Render(helpText)
 		}
 		b.WriteString(helpText)
-
-		// Apply the overall width constraint
-		output := b.String()
-		if m.width > 0 {
-			return contentStyle.Render(output)
-		}
-		return output
+		return b.String()
 	}
+
+	// Check if current field is a regex field with content and pane is enabled
+	var regexExplanation string
+	var showPane bool
+	if m.focusIndex >= 0 && m.focusIndex < len(m.fields) {
+		currentField := m.fields[m.focusIndex]
+		if currentField.variable.Type == "regex" && currentField.value != "" && m.showRegexPane {
+			regexExplanation = regex.ExplainRegexPattern(currentField.value)
+			// Only show pane if terminal is wide enough (at least 100 chars)
+			showPane = m.width >= 100
+		}
+	}
+
+	// Determine layout widths
+	// Start with full width, only split if we're actually showing the pane
+	formWidth := m.width
+	if showPane && regexExplanation != "" {
+		// Split the width: 60% for form, 40% for explanation
+		formWidth = int(float64(m.width) * 0.6)
+	}
+	// If formWidth is 0 or negative (shouldn't happen but safety check), use full width
+	if formWidth <= 0 {
+		formWidth = m.width
+	}
+
+	// Build the form fields
+	var formBuilder strings.Builder
 
 	// Render each field
 	for i := range m.fields {
@@ -529,56 +571,158 @@ func (m formModel) View() string {
 			}
 		}
 
-		// Build the line
+		// Build the line with wrapping
 		line := fmt.Sprintf("%s%s %s", linePrefix, styledLabel, displayValue)
 
-		// Use Lip Gloss to handle wrapping if width is set
-		if m.width > 0 {
-			// Wrap the line at terminal width
-			wrappedLine := lipgloss.NewStyle().Width(m.width).Render(line)
-			b.WriteString(wrappedLine)
-			b.WriteString("\n")
+		// Apply width constraint for proper wrapping (formWidth is either split width or full width)
+		if formWidth > 0 {
+			wrappedLine := lipgloss.NewStyle().Width(formWidth).Render(line)
+			formBuilder.WriteString(wrappedLine)
 		} else {
-			b.WriteString(line)
-			b.WriteString("\n")
+			formBuilder.WriteString(line)
 		}
+		formBuilder.WriteString("\n")
 
 		// Add error message if present
 		if field.errorMessage != "" {
 			errorLine := "    " + errorStyle.Render("[Error: "+field.errorMessage+"]")
-			if m.width > 0 {
-				errorLine = lipgloss.NewStyle().Width(m.width).Render(errorLine)
+			if formWidth > 0 {
+				errorLine = lipgloss.NewStyle().Width(formWidth).Render(errorLine)
 			}
-			b.WriteString(errorLine + "\n")
+			formBuilder.WriteString(errorLine)
+			formBuilder.WriteString("\n")
 		}
 	}
 
-	// Add instructions at the bottom
-	b.WriteString("\n")
+	// Add instructions at the bottom of the form
+	formBuilder.WriteString("\n")
 	// Show different help text based on current field type
 	var helpText string
 	if len(m.fields) > 0 && m.focusIndex >= 0 && m.focusIndex < len(m.fields) {
 		currentField := m.fields[m.focusIndex]
 		if len(currentField.enumOptions) > 0 {
-			helpText = helpStyle.Render("Tab/↑↓: Navigate fields  ←→: Select options  Enter: Submit  Esc: Cancel")
+			helpText = helpStyle.Render("Tab/↑↓: Navigate  ←→: Select  Enter: Submit  Esc: Cancel")
+		} else if currentField.variable.Type == "regex" {
+			// Show regex-specific help
+			paneStatus := "on"
+			if !m.showRegexPane {
+				paneStatus = "off"
+			}
+			helpText = helpStyle.Render(fmt.Sprintf("Tab/↑↓: Navigate  Ctrl+X: Clear  Ctrl+R: Pane(%s)  Ctrl+U/D: Scroll  Enter: Submit  Esc: Cancel", paneStatus))
 		} else {
-			helpText = helpStyle.Render("Tab/↑↓: Navigate  ←→: Move cursor  Home/End: Jump  Ctrl+U: Clear  Enter: Submit  Esc: Cancel")
+			helpText = helpStyle.Render("Tab/↑↓: Navigate  ←→: Move cursor  Home/End: Jump  Ctrl+X: Clear  Enter: Submit  Esc: Cancel")
 		}
 	} else {
 		// No fields - just show basic help
 		helpText = helpStyle.Render("Enter: Submit  Esc: Cancel")
 	}
-	if m.width > 0 {
-		helpText = lipgloss.NewStyle().Width(m.width).Render(helpText)
+	if formWidth > 0 {
+		helpText = lipgloss.NewStyle().Width(formWidth).Render(helpText)
 	}
-	b.WriteString(helpText)
+	formBuilder.WriteString(helpText)
 
-	// Apply the overall width constraint
-	output := b.String()
-	if m.width > 0 {
-		return contentStyle.Render(output)
+	formContent := formBuilder.String()
+
+	// If we have a regex explanation and should show the pane, render it in a side pane
+	if showPane && regexExplanation != "" {
+		explanationWidth := m.width - formWidth - 2 // 2 for padding/border
+
+		// Split explanation into lines for scrolling
+		explanationLines := strings.Split(strings.TrimRight(regexExplanation, "\n"), "\n")
+
+		// Calculate the maximum height available for the pane content
+		// The pane should be the FULL terminal height since it's side-by-side with the form
+		// Pane structure: title (1) + top indicator (1) + content (N) + bottom indicator (1) + borders (2)
+		// Total pane lines = N + 5, so N = m.height - 5
+		maxContentLines := m.height - 5 // Full height minus title, indicators, and borders
+		if maxContentLines < 5 {
+			maxContentLines = 5 // Minimum readable height
+		}
+
+		// Limit scroll based on actual content
+		// If we have 20 lines and can show 15, max scroll is 5 (to show lines 5-20)
+		maxScroll := len(explanationLines) - maxContentLines
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+
+		// Strictly clamp scroll position - don't allow scrolling past the end
+		if m.regexPaneScrollUp > maxScroll {
+			m.regexPaneScrollUp = maxScroll
+		}
+		if m.regexPaneScrollUp < 0 {
+			m.regexPaneScrollUp = 0
+		}
+
+		// Calculate visible window - STRICTLY limit to maxContentLines
+		startLine := m.regexPaneScrollUp
+
+		// Build explanation as a fixed-line-count structure
+		scrollIndicator := ""
+		if len(explanationLines) > maxContentLines {
+			scrollIndicator = fmt.Sprintf(" (%d/%d)", startLine+1, len(explanationLines))
+		}
+
+		// Check if there's more content above or below
+		hasContentAbove := startLine > 0
+		// Content below exists if we can't show all remaining lines
+		hasContentBelow := (startLine + maxContentLines) < len(explanationLines)
+
+		// Build exactly the right number of lines - structure must be EXACTLY the same every time
+		var paneLines []string
+
+		// Line 1: Title
+		paneLines = append(paneLines, regexTitleStyle.Render("Pattern Explanation"+scrollIndicator))
+
+		// Line 2: Top indicator or blank (MUST be exactly 1 line, no styling)
+		if hasContentAbove {
+			paneLines = append(paneLines, "        ↑ more above ↑")
+		} else {
+			paneLines = append(paneLines, " ")
+		}
+
+		// Lines 3 to 3+maxContentLines: Content (MUST be exactly maxContentLines)
+		for i := 0; i < maxContentLines; i++ {
+			lineIdx := startLine + i
+			if lineIdx < len(explanationLines) {
+				paneLines = append(paneLines, explanationLines[lineIdx])
+			} else {
+				paneLines = append(paneLines, " ")
+			}
+		}
+
+		// Last line: Bottom indicator or blank (MUST be exactly 1 line, no styling)
+		if hasContentBelow {
+			paneLines = append(paneLines, "        ↓ more below ↓")
+		} else {
+			paneLines = append(paneLines, " ")
+		}
+
+		// Verify we have exactly maxContentLines + 3 lines
+		expectedLines := maxContentLines + 3
+		if len(paneLines) != expectedLines {
+			// Safety: force exact line count
+			for len(paneLines) < expectedLines {
+				paneLines = append(paneLines, " ")
+			}
+			if len(paneLines) > expectedLines {
+				paneLines = paneLines[:expectedLines]
+			}
+		}
+
+		// Join and render WITHOUT height constraint - let the line count control it
+		paneContent := strings.Join(paneLines, "\n")
+		explanationContent := regexExplanationStyle.
+			Width(explanationWidth).
+			UnsetHeight().
+			UnsetMaxHeight().
+			Render(paneContent)
+
+		// Join form and explanation horizontally
+		return lipgloss.JoinHorizontal(lipgloss.Top, formContent, explanationContent)
 	}
-	return output
+
+	return formContent
 }
 
 // getValues returns the form values as a map
