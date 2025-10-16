@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"text/template"
 
 	"github.com/samling/command-snippets/internal/models"
 	"github.com/samling/command-snippets/internal/regex"
@@ -81,6 +82,22 @@ var (
 	regexTitleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("214")).
 			Bold(true)
+
+	commandPreviewStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("86")). // Cyan
+				Padding(0, 0).
+				MarginBottom(1)
+
+	commandPreviewTitleStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("86")).
+					Bold(true)
+
+	unfilledVarStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("208")). // Orange for unfilled variables
+				Bold(true)
+
+	filledVarStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("120")) // Green for filled variables
 )
 
 // formField represents a single field in the form
@@ -95,6 +112,7 @@ type formField struct {
 
 // formModel represents the state of the form
 type formModel struct {
+	snippet           *models.Snippet
 	fields            []formField
 	focusIndex        int
 	done              bool
@@ -170,6 +188,7 @@ func newFormModel(snippet *models.Snippet, presetValues map[string]string, confi
 	}
 
 	return formModel{
+		snippet:       snippet,
 		fields:        fields,
 		focusIndex:    0,
 		config:        config,
@@ -479,6 +498,145 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// applyTransformation applies variable transformations for preview purposes
+func (m formModel) applyTransformation(variable models.Variable, value string, allValues map[string]string) string {
+	// Determine which transform to use
+	var transform *models.Transform
+
+	// Use transformTemplate if specified
+	if variable.TransformTemplate != "" && m.config != nil {
+		if tmplDef, exists := m.config.TransformTemplates[variable.TransformTemplate]; exists {
+			transform = tmplDef.Transform
+		}
+	} else if variable.Transform != nil {
+		transform = variable.Transform
+	}
+
+	// Handle computed variables with compose first
+	if variable.Computed && transform != nil && transform.Compose != "" {
+		tmpl, err := template.New("compose").Parse(transform.Compose)
+		if err != nil {
+			// On error, return empty string for preview
+			return ""
+		}
+
+		var buf strings.Builder
+		if err := tmpl.Execute(&buf, allValues); err != nil {
+			// On error, return empty string for preview
+			return ""
+		}
+		return buf.String()
+	}
+
+	// Handle transformations
+	if transform != nil {
+		// Boolean transformations
+		if variable.Type == "boolean" {
+			if value == "true" || value == "yes" || value == "1" {
+				return transform.TrueValue
+			}
+			return transform.FalseValue
+		}
+
+		// Regular transformations
+		if value == "" && transform.EmptyValue != "" {
+			return transform.EmptyValue
+		} else if value != "" && transform.ValuePattern != "" {
+			// Use Go template for value pattern
+			tmpl, err := template.New("transform").Parse(transform.ValuePattern)
+			if err != nil {
+				// Fallback to simple replacement on error
+				return strings.ReplaceAll(transform.ValuePattern, "{{.Value}}", value)
+			}
+
+			var buf strings.Builder
+			data := map[string]string{"Value": value}
+			if err := tmpl.Execute(&buf, data); err != nil {
+				// Fallback to simple replacement on error
+				return strings.ReplaceAll(transform.ValuePattern, "{{.Value}}", value)
+			}
+			return buf.String()
+		}
+	}
+
+	// Use default value if empty
+	if value == "" {
+		return variable.DefaultValue
+	}
+
+	return value
+}
+
+// renderCommandPreview generates a preview of the command with current values
+func (m formModel) renderCommandPreview() string {
+	if m.snippet == nil {
+		return ""
+	}
+
+	command := m.snippet.Command
+	result := command
+
+	// Build a map of variable values for quick lookup (only non-computed variables)
+	valueMap := make(map[string]string)
+	filledMap := make(map[string]bool)
+	for _, field := range m.fields {
+		valueMap[field.variable.Name] = field.value
+		filledMap[field.variable.Name] = field.value != ""
+	}
+
+	// Replace each variable placeholder with styled version
+	for _, variable := range m.snippet.Variables {
+		placeholder := fmt.Sprintf("<%s>", variable.Name)
+
+		if !strings.Contains(result, placeholder) {
+			continue
+		}
+
+		// For computed variables, we don't have a raw value from fields
+		rawValue := ""
+		isFilled := false
+		if !variable.Computed {
+			rawValue = valueMap[variable.Name]
+			isFilled = filledMap[variable.Name]
+		}
+
+		// Apply transformations to get the actual value that would be used
+		transformedValue := m.applyTransformation(variable, rawValue, valueMap)
+
+		// Create the styled replacement
+		var replacement string
+		if variable.Computed {
+			// For computed variables, show the result or placeholder
+			if transformedValue != "" {
+				// Successfully computed - show in green
+				replacement = filledVarStyle.Render(transformedValue)
+			} else {
+				// Computation failed or dependencies not ready - show placeholder in orange
+				replacement = unfilledVarStyle.Render(placeholder)
+			}
+		} else if transformedValue != "" {
+			// Show transformed value in green if non-empty
+			replacement = filledVarStyle.Render(transformedValue)
+		} else if isFilled && rawValue != "" {
+			// Field is filled but transformation produced empty string - show nothing (empty)
+			replacement = ""
+		} else {
+			// Show placeholder if empty and not filled
+			replacement = unfilledVarStyle.Render(placeholder)
+		}
+
+		result = strings.ReplaceAll(result, placeholder, replacement)
+	}
+
+	// Build the preview box
+	var b strings.Builder
+	b.WriteString(commandPreviewTitleStyle.Render("Command Preview:"))
+	b.WriteString("\n")
+	b.WriteString(result)
+
+	return commandPreviewStyle.Render(b.String())
+}
+
 // View renders the form
 func (m formModel) View() string {
 	if m.done || m.cancelled {
@@ -525,6 +683,16 @@ func (m formModel) View() string {
 
 	// Build the form fields
 	var formBuilder strings.Builder
+
+	// Add command preview at the top
+	commandPreview := m.renderCommandPreview()
+	if commandPreview != "" {
+		if formWidth > 0 {
+			commandPreview = lipgloss.NewStyle().Width(formWidth).Render(commandPreview)
+		}
+		formBuilder.WriteString(commandPreview)
+		formBuilder.WriteString("\n")
+	}
 
 	// Render each field
 	for i := range m.fields {

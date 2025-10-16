@@ -40,9 +40,11 @@ Thumbs.db
 *.tmp
 *.temp
 
-# Configuration files (but keep example)
+# Configuration files (but keep example and testdata)
 config.yaml
 snippets.yaml
+!testdata/config.yaml
+!testdata/snippets.yaml
 
 # Local project snippets (can be committed if desired)
 .csnippets
