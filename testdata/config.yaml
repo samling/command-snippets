@@ -1,0 +1,11 @@
+settings:
+  additional_configs:
+    - testdata/test_snippets.yaml
+    - testdata/types.yaml
+    - testdata/transform_templates.yaml
+  interactive:
+    confirm_before_execute: false
+    show_final_command: true
+  selector:
+    command: fzf
+    options: --height 60% --reverse --border
