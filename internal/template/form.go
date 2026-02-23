@@ -133,11 +133,7 @@ func newFormModel(snippet *models.Snippet, presetValues map[string]string, confi
 			continue // Skip computed variables
 		}
 
-		// Initialize field with safe defaults
 		defaultValue := variable.DefaultValue
-		if defaultValue == "" {
-			defaultValue = "" // Explicitly set empty string
-		}
 
 		field := formField{
 			variable:  variable,

@@ -763,7 +763,6 @@ func TestProcessTemplate_InvalidTransformTemplate(t *testing.T) {
 	config := loadTestConfig(t)
 
 	snippet := Snippet{
-		ID:      "test",
 		Command: "test <var>",
 		Variables: []Variable{
 			{

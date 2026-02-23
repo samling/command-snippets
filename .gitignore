@@ -51,3 +51,21 @@ snippets.yaml
 
 # Logs
 *.log
+
+# Claude sandbox artifacts
+.bash_profile
+.bashrc
+.gitconfig
+.gitmodules
+.mcp.json
+.idea
+.profile
+.ripgreprc
+.zprofile
+.zshrc
+HEAD
+config
+hooks
+objects
+refs
+.vscode

@@ -30,11 +30,6 @@ func NewProcessor(config *models.Config) *Processor {
 	}
 }
 
-// ExecuteWithMode prompts for variables and handles execution based on specified mode
-func (p *Processor) ExecuteWithMode(snippet *models.Snippet, mode ExecutionMode) error {
-	return p.ExecuteWithModeAndPresets(snippet, mode, nil)
-}
-
 // ExecuteWithModeAndPresets prompts for variables (skipping preset ones) and handles execution
 func (p *Processor) ExecuteWithModeAndPresets(snippet *models.Snippet, mode ExecutionMode, presetValues map[string]string) error {
 	values, err := p.promptForVariablesWithPresets(snippet, presetValues)
@@ -77,21 +72,9 @@ func (p *Processor) ExecuteWithModeAndPresets(snippet *models.Snippet, mode Exec
 	}
 }
 
-// InteractiveExecute prompts for variables and executes a snippet (legacy method)
-// This maintains backward compatibility and uses the PromptExecute mode
-func (p *Processor) InteractiveExecute(snippet *models.Snippet) error {
-	return p.ExecuteWithMode(snippet, PromptExecute)
-}
-
 // ProcessSnippet processes a snippet with given values (non-interactive)
 func (p *Processor) ProcessSnippet(snippet *models.Snippet, values map[string]string) (string, error) {
 	return snippet.ProcessTemplate(values, p.config)
-}
-
-// promptForVariables interactively prompts for snippet variables
-func (p *Processor) promptForVariables(snippet *models.Snippet) (map[string]string, error) {
-	// Use Bubble Tea form for prompting
-	return promptForVariablesWithBubbleTea(snippet, nil, p.config)
 }
 
 // promptForVariablesWithPresets interactively prompts for snippet variables, using preset values where available

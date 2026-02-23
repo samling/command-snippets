@@ -24,12 +24,6 @@ func TestConfigLoading(t *testing.T) {
 			t.Fatalf("Failed to parse config: %v", err)
 		}
 
-		if config.Settings.Interactive.ShowFinalCommand != true {
-			t.Error("Expected show_final_command to be true")
-		}
-		if config.Settings.Interactive.ConfirmBeforeExecute != false {
-			t.Error("Expected confirm_before_execute to be false")
-		}
 		if config.Settings.Selector.Command != "fzf" {
 			t.Errorf("Expected selector command 'fzf', got %q", config.Settings.Selector.Command)
 		}
@@ -150,9 +144,6 @@ func TestConfigLoading(t *testing.T) {
 		}
 
 		simpleSnippet := config.Snippets["simple-no-vars"]
-		if simpleSnippet.ID != "simple-no-vars" {
-			t.Errorf("Expected ID 'simple-no-vars', got %q", simpleSnippet.ID)
-		}
 		if simpleSnippet.Command == "" {
 			t.Error("Snippet should have command")
 		}
@@ -359,10 +350,6 @@ func TestSnippetStructure(t *testing.T) {
 			snippet, exists := config.Snippets[tt.snippetID]
 			if !exists {
 				t.Fatalf("Snippet %q not found", tt.snippetID)
-			}
-
-			if snippet.ID != tt.snippetID {
-				t.Errorf("Expected ID %q, got %q", tt.snippetID, snippet.ID)
 			}
 
 			if snippet.Command == "" {

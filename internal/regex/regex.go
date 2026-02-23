@@ -110,14 +110,6 @@ func ExplainRegexPattern(pattern string) string {
 	return result.String()
 }
 
-// Helper function to get maximum of two integers
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func isMetaChar(c byte) bool {
 	return c == '^' || c == '$' || c == '.' || c == '[' || c == ']' || c == '|'
 }
@@ -135,19 +127,10 @@ func getCharacterExplanation(pattern string, pos int, char rune) string {
 	case '.':
 		return "Match any character except newline"
 	case '*':
-		if pos > 0 {
-			return "Match previous character zero or more times"
-		}
 		return "Match previous character zero or more times"
 	case '+':
-		if pos > 0 {
-			return "Match previous character one or more times"
-		}
 		return "Match previous character one or more times"
 	case '?':
-		if pos > 0 {
-			return "Match previous character zero or one time"
-		}
 		return "Match previous character zero or one time"
 	case '[':
 		return "Start character class"

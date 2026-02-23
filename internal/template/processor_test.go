@@ -530,7 +530,6 @@ func TestProcessSnippet_ErrorHandling(t *testing.T) {
 		{
 			name: "invalid transform template",
 			snippet: models.Snippet{
-				ID:      "test",
 				Command: "test <var>",
 				Variables: []models.Variable{
 					{
@@ -545,7 +544,6 @@ func TestProcessSnippet_ErrorHandling(t *testing.T) {
 		{
 			name: "invalid compose template syntax",
 			snippet: models.Snippet{
-				ID:      "test",
 				Command: "test <var>",
 				Variables: []models.Variable{
 					{
@@ -563,7 +561,6 @@ func TestProcessSnippet_ErrorHandling(t *testing.T) {
 		{
 			name: "invalid value pattern syntax",
 			snippet: models.Snippet{
-				ID:      "test",
 				Command: "test <var>",
 				Variables: []models.Variable{
 					{

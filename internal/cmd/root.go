@@ -286,10 +286,6 @@ func createDefaultConfig() *models.Config {
 			AdditionalConfigs: []string{
 				"snippets/*.yaml",
 			},
-			Interactive: models.InteractiveConfig{
-				ConfirmBeforeExecute: false,
-				ShowFinalCommand:     true,
-			},
 			Selector: models.SelectorConfig{
 				Command: "fzf",
 				Options: "--height 40% --reverse --border --sort",

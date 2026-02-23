@@ -184,9 +184,6 @@ func showConfig() error {
 	if config.Settings.Selector.Command != "" {
 		fmt.Printf("  External Selector: %s %s\n", config.Settings.Selector.Command, config.Settings.Selector.Options)
 	}
-	fmt.Printf("  Interactive Settings: confirm_before_execute=%t, show_final_command=%t\n",
-		config.Settings.Interactive.ConfirmBeforeExecute,
-		config.Settings.Interactive.ShowFinalCommand)
 
 	return nil
 }
