@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 	"text/template"
-	"time"
 )
 
 // SnippetSource represents where a snippet was loaded from
@@ -18,14 +17,11 @@ const (
 
 // Snippet represents a command template
 type Snippet struct {
-	ID          string        `yaml:"id"`
 	Name        string        `yaml:"name"`
 	Description string        `yaml:"description"`
 	Command     string        `yaml:"command"`
 	Variables   []Variable    `yaml:"variables,omitempty"`
 	Tags        []string      `yaml:"tags,omitempty"`
-	CreatedAt   time.Time     `yaml:"created_at"`
-	UpdatedAt   time.Time     `yaml:"updated_at"`
 	Source      SnippetSource `yaml:"-"` // Not persisted to YAML, set during loading
 }
 
@@ -82,14 +78,8 @@ type Config struct {
 
 // Settings contains global configuration
 type Settings struct {
-	AdditionalConfigs []string          `yaml:"additional_configs,omitempty"`
-	Interactive       InteractiveConfig `yaml:"interactive"`
-	Selector          SelectorConfig    `yaml:"selector"`
-}
-
-type InteractiveConfig struct {
-	ConfirmBeforeExecute bool `yaml:"confirm_before_execute"`
-	ShowFinalCommand     bool `yaml:"show_final_command"`
+	AdditionalConfigs []string       `yaml:"additional_configs,omitempty"`
+	Selector          SelectorConfig `yaml:"selector"`
 }
 
 type SelectorConfig struct {

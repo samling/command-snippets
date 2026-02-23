@@ -120,8 +120,7 @@ func selectSnippet(forceInternal bool, noColor bool) (string, error) {
 	// Build snippets map with pointers
 	snippetsMap := make(map[string]*models.Snippet)
 	for name, snippet := range config.Snippets {
-		s := snippet // Create a copy to get a pointer
-		snippetsMap[name] = &s
+		snippetsMap[name] = &snippet
 	}
 
 	// Build options for external selector - need to sort them

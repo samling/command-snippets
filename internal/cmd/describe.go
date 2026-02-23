@@ -146,7 +146,7 @@ func displayVariable(variable models.Variable) {
 	}
 
 	// Show type-based validation from config
-	if variable.Type != "" && config != nil {
+	if variable.Type != "" {
 		if varType, exists := config.VariableTypes[variable.Type]; exists {
 			if varType.Description != "" {
 				fmt.Printf("    Type Description: %s\n", varType.Description)

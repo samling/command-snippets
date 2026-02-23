@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/samling/command-snippets/internal/models"
 
@@ -50,10 +49,7 @@ func runAdd() error {
 }
 
 func promptForSnippet() (*models.Snippet, error) {
-	snippet := &models.Snippet{
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
+	snippet := &models.Snippet{}
 
 	// Prompt for basic information
 	questions := []*survey.Question{
@@ -112,7 +108,6 @@ func promptForSnippet() (*models.Snippet, error) {
 		snippet.Variables = append(snippet.Variables, *variable)
 	}
 
-	snippet.ID = generateSnippetID(snippet.Name)
 	return snippet, nil
 }
 
@@ -194,7 +189,11 @@ func promptForVariable(varName string) (*models.Variable, error) {
 		// Show available transform templates
 		if len(config.TransformTemplates) == 0 {
 			fmt.Println("No transform templates available. Creating inline transform instead.")
-			variable.Transform = promptForInlineTransform()
+			t, err := promptForInlineTransform()
+			if err != nil {
+				return nil, err
+			}
+			variable.Transform = t
 		} else {
 			templates := make([]string, 0, len(config.TransformTemplates))
 			for name := range config.TransformTemplates {
@@ -212,13 +211,17 @@ func promptForVariable(varName string) (*models.Variable, error) {
 		}
 
 	case "Inline transform":
-		variable.Transform = promptForInlineTransform()
+		t, err := promptForInlineTransform()
+		if err != nil {
+			return nil, err
+		}
+		variable.Transform = t
 	}
 
 	return variable, nil
 }
 
-func promptForInlineTransform() *models.Transform {
+func promptForInlineTransform() (*models.Transform, error) {
 	transform := &models.Transform{}
 
 	transformQuestions := []*survey.Question{
@@ -238,16 +241,11 @@ func promptForInlineTransform() *models.Transform {
 	}{}
 
 	if err := survey.Ask(transformQuestions, &transformAnswers); err != nil {
-		return nil
+		return nil, err
 	}
 
 	transform.EmptyValue = transformAnswers.EmptyValue
 	transform.ValuePattern = transformAnswers.ValuePattern
 
-	return transform
-}
-
-func generateSnippetID(name string) string {
-	// Simple ID generation - in production, you might want something more robust
-	return strings.ReplaceAll(strings.ToLower(name), " ", "-")
+	return transform, nil
 }
