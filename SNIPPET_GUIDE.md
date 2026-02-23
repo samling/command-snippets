@@ -26,7 +26,6 @@ The simplest snippet consists of a command template with variables:
 ```yaml
 snippets:
   hello-world:
-    id: "hello-world"
     name: "hello-world"
     description: "Say hello to someone"
     command: "echo 'Hello, <name>!'"
@@ -35,8 +34,6 @@ snippets:
         description: "Name to greet"
         required: true
     tags: ["example", "simple"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
 ```
 
 ## Snippet Structure
@@ -47,12 +44,9 @@ Every snippet consists of these top-level fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Unique identifier for the snippet (usually same as the YAML key) |
-| `name` | string | Display name for the snippet (usually same as id) |
+| `name` | string | Display name for the snippet (usually same as the YAML key) |
 | `description` | string | Human-readable description of what the command does |
 | `command` | string | The command template with `<variable>` placeholders |
-| `created_at` | timestamp | ISO 8601 timestamp when snippet was created |
-| `updated_at` | timestamp | ISO 8601 timestamp when snippet was last updated |
 
 ### Optional Fields
 
@@ -66,7 +60,6 @@ Every snippet consists of these top-level fields:
 ```yaml
 snippets:
   kubectl-get-pods:
-    id: "kubectl-get-pods"
     name: "kubectl-get-pods"
     description: "Get Kubernetes pods with namespace selection"
     command: "kubectl get pods <namespace>"
@@ -76,8 +69,6 @@ snippets:
         type: "namespace"
         transformTemplate: "k8s-namespace"
     tags: ["kubernetes", "pods", "kubectl"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
 ```
 
 ## Variables
@@ -459,7 +450,6 @@ Create a snippet that constructs a full branch reference:
 ```yaml
 snippets:
   git-checkout-remote:
-    id: "git-checkout-remote"
     name: "git-checkout-remote"
     description: "Checkout remote branch"
     command: "git checkout <branch_ref>"
@@ -476,8 +466,6 @@ snippets:
         transform:
           compose: "{{.remote}}/{{.branch}}"
     tags: ["git", "branch"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
 ```
 
 ### Example 2: Docker Run with Optional Flags
@@ -487,7 +475,6 @@ Handle multiple optional Docker flags elegantly:
 ```yaml
 snippets:
   docker-run-advanced:
-    id: "docker-run-advanced"
     name: "docker-run-advanced"
     description: "Run Docker container with optional flags"
     command: "docker run <detach> <port> <volume> <name> <image>"
@@ -528,8 +515,6 @@ snippets:
         description: "Docker image"
         required: true
     tags: ["docker", "container"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
 ```
 
 **Usage:**
@@ -549,7 +534,6 @@ Create a snippet that optionally adds a backup extension:
 ```yaml
 snippets:
   sed-edit-file:
-    id: "sed-edit-file"
     name: "sed-edit-file"
     description: "Edit file with sed"
     command: "sed -i<backup> 's/<search>/<replace>/g' <file>"
@@ -574,8 +558,6 @@ snippets:
         description: "File to edit"
         required: true
     tags: ["sed", "edit", "file"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
 ```
 
 **Usage:**
@@ -594,7 +576,6 @@ Combine multiple computed variables:
 ```yaml
 snippets:
   kubectl-port-forward:
-    id: "kubectl-port-forward"
     name: "kubectl-port-forward"
     description: "Forward local port to pod or service"
     command: "kubectl port-forward <resource> <port_mapping> <namespace>"
@@ -643,8 +624,6 @@ snippets:
         type: "namespace"
         transformTemplate: "k8s-namespace"
     tags: ["kubernetes", "port-forward", "networking"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
 ```
 
 ## Best Practices
