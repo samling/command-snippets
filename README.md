@@ -240,7 +240,6 @@ Then organize your snippets by topic:
 # ~/.config/cs/snippets/kubernetes.yaml
 snippets:
   kubectl-describe-pod:
-    id: "kubectl-describe-pod"
     description: "Describe a specific pod"
     command: "kubectl describe pod <pod_name> <namespace>"
     variables:
