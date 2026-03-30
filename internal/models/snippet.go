@@ -33,7 +33,7 @@ type Variable struct {
 	Required          bool        `yaml:"required,omitempty"`
 	Type              string      `yaml:"type,omitempty"`
 	Transform         *Transform  `yaml:"transform,omitempty"`
-	TransformTemplate string      `yaml:"transformTemplate,omitempty"`
+	TransformTemplate string      `yaml:"transform_template,omitempty"`
 	Validation        *Validation `yaml:"validation,omitempty"`
 	Computed          bool        `yaml:"computed,omitempty"`
 }
