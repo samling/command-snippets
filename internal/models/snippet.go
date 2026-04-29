@@ -15,6 +15,28 @@ const (
 	SourceLocal  SnippetSource = "local"
 )
 
+// Built-in variable type identifiers. User-defined types in
+// Config.VariableTypes use arbitrary strings; these are the two the engine
+// treats specially.
+const (
+	VarTypeBoolean = "boolean"
+	VarTypeRegex   = "regex"
+)
+
+// parseBool returns true for the truthy string forms accepted by snippet
+// boolean variables. Anything else is false (including the empty string).
+func parseBool(s string) bool {
+	switch s {
+	case "true", "yes", "1":
+		return true
+	}
+	return false
+}
+
+// placeholderPattern matches <name> tokens in command templates. Variable
+// names are letters/digits/underscores starting with a letter or underscore.
+var placeholderPattern = regexp.MustCompile(`<([A-Za-z_][A-Za-z0-9_]*)>`)
+
 // Snippet represents a command template
 type Snippet struct {
 	Name        string        `yaml:"name"`
@@ -45,6 +67,35 @@ type Transform struct {
 	TrueValue    string `yaml:"true_value,omitempty"`
 	FalseValue   string `yaml:"false_value,omitempty"`
 	Compose      string `yaml:"compose,omitempty"`
+
+	composeTpl      *template.Template
+	composeTplErr   error
+	valuePatternTpl *template.Template
+	valuePatternErr error
+}
+
+// composeTemplate returns the parsed Compose template, caching the result.
+// Returns (nil, nil) when Compose is empty.
+func (t *Transform) composeTemplate() (*template.Template, error) {
+	if t.Compose == "" {
+		return nil, nil
+	}
+	if t.composeTpl == nil && t.composeTplErr == nil {
+		t.composeTpl, t.composeTplErr = template.New("compose").Parse(t.Compose)
+	}
+	return t.composeTpl, t.composeTplErr
+}
+
+// valuePatternTemplate returns the parsed ValuePattern template, caching the result.
+// Returns (nil, nil) when ValuePattern is empty.
+func (t *Transform) valuePatternTemplate() (*template.Template, error) {
+	if t.ValuePattern == "" {
+		return nil, nil
+	}
+	if t.valuePatternTpl == nil && t.valuePatternErr == nil {
+		t.valuePatternTpl, t.valuePatternErr = template.New("transform").Parse(t.ValuePattern)
+	}
+	return t.valuePatternTpl, t.valuePatternErr
 }
 
 // Validation defines variable validation rules
@@ -87,50 +138,55 @@ type SelectorConfig struct {
 	Options string `yaml:"options"`
 }
 
-// ProcessTemplate processes a snippet with variable substitution
+// ProcessTemplate processes a snippet with variable substitution.
 func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (string, error) {
-	command := s.Command
-
-	// Process each variable defined in the snippet
+	processed := make(map[string]string, len(s.Variables))
 	for _, variable := range s.Variables {
-		placeholder := fmt.Sprintf("<%s>", variable.Name)
-		value := values[variable.Name]
-
-		processedValue, err := s.processVariable(variable, value, values, config)
+		result, err := s.ProcessVariable(variable, values[variable.Name], values, config)
 		if err != nil {
 			return "", fmt.Errorf("processing variable %s: %w", variable.Name, err)
 		}
-
-		command = strings.ReplaceAll(command, placeholder, processedValue)
+		processed[variable.Name] = result
 	}
 
-	return command, nil
+	return placeholderPattern.ReplaceAllStringFunc(s.Command, func(match string) string {
+		name := match[1 : len(match)-1]
+		if val, ok := processed[name]; ok {
+			return val
+		}
+		return match
+	}), nil
 }
 
-// processVariable handles individual variable transformation
-func (s *Snippet) processVariable(variable Variable, value string, allValues map[string]string, config *Config) (string, error) {
-	// Determine which transform to use
-	var transform *Transform
-
-	// Use transformTemplate if specified
-	if variable.TransformTemplate != "" {
-		if tmplDef, exists := config.TransformTemplates[variable.TransformTemplate]; exists {
-			transform = tmplDef.Transform
-		} else {
-			return "", fmt.Errorf("transform template '%s' not found", variable.TransformTemplate)
+// ResolveTransform returns the Transform that applies to this variable, either
+// from a named transform_template or the inline definition. Returns nil when
+// the variable has no transform. Errors when a named template is missing.
+func (v *Variable) ResolveTransform(config *Config) (*Transform, error) {
+	if v.TransformTemplate != "" {
+		if config == nil {
+			return nil, fmt.Errorf("transform template %q requires config", v.TransformTemplate)
 		}
-	} else if variable.Transform != nil {
-		// Use inline transform
-		transform = variable.Transform
+		if tmpl, ok := config.TransformTemplates[v.TransformTemplate]; ok {
+			return tmpl.Transform, nil
+		}
+		return nil, fmt.Errorf("transform template '%s' not found", v.TransformTemplate)
+	}
+	return v.Transform, nil
+}
+
+// ProcessVariable applies the variable's transform (if any) to value, using
+// allValues as the binding for compose templates.
+func (s *Snippet) ProcessVariable(variable Variable, value string, allValues map[string]string, config *Config) (string, error) {
+	transform, err := variable.ResolveTransform(config)
+	if err != nil {
+		return "", err
 	}
 
-	// Handle computed variables first
 	if variable.Computed && transform != nil && transform.Compose != "" {
-		tmpl, err := template.New("compose").Parse(transform.Compose)
+		tmpl, err := transform.composeTemplate()
 		if err != nil {
 			return "", err
 		}
-
 		var buf strings.Builder
 		if err := tmpl.Execute(&buf, allValues); err != nil {
 			return "", err
@@ -138,39 +194,33 @@ func (s *Snippet) processVariable(variable Variable, value string, allValues map
 		return buf.String(), nil
 	}
 
-	// Handle transformations
 	if transform != nil {
-		// Boolean transformations
-		if variable.Type == "boolean" {
-			if value == "true" || value == "yes" || value == "1" {
+		if variable.Type == VarTypeBoolean {
+			if parseBool(value) {
 				return transform.TrueValue, nil
 			}
 			return transform.FalseValue, nil
 		}
 
-		// Regular transformations
 		if value == "" && transform.EmptyValue != "" {
 			return transform.EmptyValue, nil
-		} else if value != "" && transform.ValuePattern != "" {
-			tmpl, err := template.New("transform").Parse(transform.ValuePattern)
+		}
+		if value != "" && transform.ValuePattern != "" {
+			tmpl, err := transform.valuePatternTemplate()
 			if err != nil {
 				return "", err
 			}
-
 			var buf strings.Builder
-			data := map[string]string{"Value": value}
-			if err := tmpl.Execute(&buf, data); err != nil {
+			if err := tmpl.Execute(&buf, map[string]string{"Value": value}); err != nil {
 				return "", err
 			}
 			return buf.String(), nil
 		}
 	}
 
-	// Use default value if empty
 	if value == "" {
 		return variable.DefaultValue, nil
 	}
-
 	return value, nil
 }
 
@@ -234,7 +284,7 @@ func (v *Variable) ValidateWithConfig(value string, config *Config) error {
 	}
 
 	// Special handling for regex type - validate that the value is a valid regex pattern
-	if v.Type == "regex" {
+	if v.Type == VarTypeRegex {
 		_, err := regexp.Compile(value)
 		if err != nil {
 			return fmt.Errorf("variable %s must be a valid regular expression: %v", v.Name, err)

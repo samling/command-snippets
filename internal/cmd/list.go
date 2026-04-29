@@ -2,7 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/samling/command-snippets/internal/models"
@@ -117,15 +118,7 @@ func runList(filterTags []string, verbose bool, showLocal bool, showGlobal bool)
 }
 
 func displaySnippetGroup(snippets map[string]models.Snippet, verbose bool) {
-	// Get all snippet names and sort them alphabetically
-	var names []string
-	for name := range snippets {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	// Iterate through sorted names
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(snippets)) {
 		snippet := snippets[name]
 
 		// Basic display

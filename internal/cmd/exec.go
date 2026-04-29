@@ -3,9 +3,10 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -123,18 +124,9 @@ func selectSnippet(forceInternal bool, noColor bool) (string, error) {
 		snippetsMap[name] = &snippet
 	}
 
-	// Build options for external selector - need to sort them
-	// First get sorted names
-	var names []string
-	for name := range config.Snippets {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	// Now build options in sorted order
 	var options []string
 	snippetMap := make(map[string]string)
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(config.Snippets)) {
 		snippet := config.Snippets[name]
 		displayName := name
 		if snippet.Description != "" {

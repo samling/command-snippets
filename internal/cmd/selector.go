@@ -2,8 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -47,18 +48,9 @@ type selectorModel struct {
 
 // newSelectorModel creates a new selector model
 func newSelectorModel(snippets map[string]*models.Snippet) selectorModel {
-	// First, get all snippet names and sort them
-	var names []string
-	for name := range snippets {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	// Now build options in sorted order
 	var options []string
 	snippetMap := make(map[string]string)
-
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(snippets)) {
 		snippet := snippets[name]
 		displayName := name
 		if snippet.Description != "" {
@@ -71,8 +63,6 @@ func newSelectorModel(snippets map[string]*models.Snippet) selectorModel {
 		options = append(options, displayName)
 		snippetMap[displayName] = name
 	}
-
-	// Options are already in sorted order since we sorted the names first
 
 	return selectorModel{
 		snippets:   snippets,

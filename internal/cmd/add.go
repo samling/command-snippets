@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/samling/command-snippets/internal/models"
@@ -195,10 +197,7 @@ func promptForVariable(varName string) (*models.Variable, error) {
 			}
 			variable.Transform = t
 		} else {
-			templates := make([]string, 0, len(config.TransformTemplates))
-			for name := range config.TransformTemplates {
-				templates = append(templates, name)
-			}
+			templates := slices.Sorted(maps.Keys(config.TransformTemplates))
 
 			var selectedTemplate string
 			if err := survey.AskOne(&survey.Select{

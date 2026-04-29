@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
 	"github.com/samling/command-snippets/internal/models"
 )
@@ -83,20 +82,20 @@ func (p *Processor) promptForVariablesWithPresets(snippet *models.Snippet, prese
 	return promptForVariablesWithBubbleTea(snippet, presetValues, p.config)
 }
 
-// executeCommand executes a shell command
+// executeCommand runs the command through the user's shell so quoting,
+// pipes, redirection, and `&&` chains behave as a user would expect.
 func (p *Processor) executeCommand(command string) error {
 	fmt.Fprintf(os.Stderr, "Executing: %s\n", command)
 
-	// Split command into parts for proper execution
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return fmt.Errorf("empty command")
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
-	cmd.Stdout = nil // Let output go to terminal
-	cmd.Stderr = nil // Let errors go to terminal
-	cmd.Stdin = nil  // Let input come from terminal
+	cmd := exec.Command(shell, "-c", command)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
 
 	return cmd.Run()
 }
