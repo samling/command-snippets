@@ -48,18 +48,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 
 	for _, name := range matches {
 		snippet := config.Snippets[name]
-
-		fmt.Printf("• %s", name)
-
-		if snippet.Description != "" {
-			fmt.Printf(" - %s", snippet.Description)
-		}
-
-		if len(snippet.Tags) > 0 {
-			fmt.Printf(" [%s]", strings.Join(snippet.Tags, ", "))
-		}
-
-		fmt.Printf("\n  Command: %s\n\n", snippet.Command)
+		fmt.Printf("• %s\n  Command: %s\n\n", snippetSummary(name, &snippet), snippet.Command)
 	}
 
 	return nil

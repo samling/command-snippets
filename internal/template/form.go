@@ -1,6 +1,7 @@
 package template
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -11,16 +12,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 	"golang.org/x/term"
 )
+
+// ErrUserCancelled is returned when the user dismisses the variable form
+// (Ctrl+C / Esc). Callers should treat it as a clean exit, not an error.
+var ErrUserCancelled = errors.New("user cancelled")
 
 // placeholderPattern matches <name> tokens used by the snippet command
 // template — must stay in sync with models.placeholderPattern.
 var placeholderPattern = regexp.MustCompile(`<([A-Za-z_][A-Za-z0-9_]*)>`)
-
-// NoColor is a global flag to disable colors in the TUI
-var NoColor bool
 
 // wrapLines takes a slice of lines and wraps any that exceed the given width
 func wrapLines(lines []string, maxWidth int) []string {
@@ -886,7 +887,7 @@ func (m formModel) getValues() map[string]string {
 }
 
 // promptForVariablesWithBubbleTea shows a Bubble Tea form for all variables
-func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[string]string, config *models.Config) (map[string]string, error) {
+func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[string]string, config *models.Config, noColor bool) (map[string]string, error) {
 	// Check if there are any non-computed variables that need user input
 	hasUserVariables := false
 	for _, variable := range snippet.Variables {
@@ -901,15 +902,7 @@ func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[s
 		return make(map[string]string), nil
 	}
 
-	// Force color output when stderr is a TTY (even in subshells), unless --no-color
-	if !NoColor && term.IsTerminal(int(os.Stderr.Fd())) {
-		// Detect the best color profile for the terminal
-		output := termenv.NewOutput(os.Stderr)
-		lipgloss.SetColorProfile(output.Profile)
-	} else if NoColor {
-		// Disable colors
-		lipgloss.SetColorProfile(termenv.Ascii)
-	}
+	SetupColorProfile(noColor)
 
 	// Get terminal width for wrapping
 	width, _, _ := term.GetSize(int(os.Stderr.Fd()))
@@ -934,7 +927,7 @@ func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[s
 	// Check if cancelled
 	form := finalModel.(formModel)
 	if form.cancelled {
-		return nil, fmt.Errorf("form cancelled")
+		return nil, ErrUserCancelled
 	}
 
 	// Return the values

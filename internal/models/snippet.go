@@ -3,6 +3,8 @@ package models
 import (
 	"fmt"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -103,6 +105,17 @@ type Validation struct {
 	Pattern string   `yaml:"pattern,omitempty"`
 	Enum    []string `yaml:"enum,omitempty"`
 	Range   []int    `yaml:"range,omitempty"`
+
+	patternRE  *regexp.Regexp
+	patternErr error
+}
+
+// compiledPattern returns the compiled Pattern regex, caching the result.
+func (v *Validation) compiledPattern() (*regexp.Regexp, error) {
+	if v.patternRE == nil && v.patternErr == nil {
+		v.patternRE, v.patternErr = regexp.Compile(v.Pattern)
+	}
+	return v.patternRE, v.patternErr
 }
 
 // TransformTemplate defines a reusable transformation template
@@ -236,34 +249,32 @@ func (v *Variable) Validate(value string) error {
 
 	// Enum validation
 	if len(v.Validation.Enum) > 0 {
-		for _, allowed := range v.Validation.Enum {
-			if value == allowed {
-				return nil
-			}
+		if slices.Contains(v.Validation.Enum, value) {
+			return nil
 		}
 		return fmt.Errorf("variable %s must be one of: %s", v.Name, strings.Join(v.Validation.Enum, ", "))
 	}
 
 	// Range validation (for numeric types like ports)
 	if len(v.Validation.Range) == 2 && value != "" {
-		var num int
-		if _, err := fmt.Sscanf(value, "%d", &num); err != nil {
+		num, err := strconv.Atoi(value)
+		if err != nil {
 			return fmt.Errorf("variable %s must be a valid number", v.Name)
 		}
 
-		min, max := v.Validation.Range[0], v.Validation.Range[1]
-		if num < min || num > max {
-			return fmt.Errorf("variable %s must be between %d and %d", v.Name, min, max)
+		lo, hi := v.Validation.Range[0], v.Validation.Range[1]
+		if num < lo || num > hi {
+			return fmt.Errorf("variable %s must be between %d and %d", v.Name, lo, hi)
 		}
 	}
 
 	// Pattern validation (regex)
 	if v.Validation.Pattern != "" && value != "" {
-		matched, err := regexp.MatchString(v.Validation.Pattern, value)
+		re, err := v.Validation.compiledPattern()
 		if err != nil {
-			return fmt.Errorf("variable %s has invalid pattern: %v", v.Name, err)
+			return fmt.Errorf("variable %s has invalid pattern: %w", v.Name, err)
 		}
-		if !matched {
+		if !re.MatchString(value) {
 			return fmt.Errorf("variable %s does not match required format", v.Name)
 		}
 	}
@@ -285,9 +296,8 @@ func (v *Variable) ValidateWithConfig(value string, config *Config) error {
 
 	// Special handling for regex type - validate that the value is a valid regex pattern
 	if v.Type == VarTypeRegex {
-		_, err := regexp.Compile(value)
-		if err != nil {
-			return fmt.Errorf("variable %s must be a valid regular expression: %v", v.Name, err)
+		if _, err := regexp.Compile(value); err != nil {
+			return fmt.Errorf("variable %s must be a valid regular expression: %w", v.Name, err)
 		}
 		return nil
 	}

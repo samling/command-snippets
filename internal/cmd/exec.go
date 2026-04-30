@@ -2,11 +2,10 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"os/exec"
-	"slices"
 	"strings"
 	"syscall"
 
@@ -68,10 +67,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Find the snippet
-	snippet, exists := config.Snippets[snippetName]
-	if !exists {
-		return fmt.Errorf("template '%s' not found", snippetName)
+	snippet, err := getSnippet(snippetName)
+	if err != nil {
+		return err
 	}
 
 	// Get execution mode flags
@@ -91,11 +89,19 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --set format: %w", err)
 	}
 
-	// Get no-color flag
-	noColor, _ := cmd.Flags().GetBool("no-color")
+	known := make(map[string]bool, len(snippet.Variables))
+	for _, v := range snippet.Variables {
+		known[v.Name] = true
+	}
+	for k := range presetValues {
+		if !known[k] {
+			return fmt.Errorf("--set %s: snippet %q has no variable named %q", k, snippetName, k)
+		}
+	}
 
-	// Set global no-color state (we'll need to export this)
-	template.NoColor = noColor
+	// Get no-color flag and pass it to the processor
+	noColor, _ := cmd.Flags().GetBool("no-color")
+	processor.NoColor = noColor
 
 	// Determine execution mode
 	var execMode template.ExecutionMode
@@ -109,7 +115,13 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute with specified mode
-	return processor.ExecuteWithModeAndPresets(&snippet, execMode, presetValues)
+	if err := processor.ExecuteWithModeAndPresets(&snippet, execMode, presetValues); err != nil {
+		if isUserCancellation(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // selectSnippet shows an interactive snippet selector
@@ -118,44 +130,24 @@ func selectSnippet(forceInternal bool, noColor bool) (string, error) {
 		return "", fmt.Errorf("no templates found")
 	}
 
-	// Build snippets map with pointers
-	snippetsMap := make(map[string]*models.Snippet)
+	snippetsMap := make(map[string]*models.Snippet, len(config.Snippets))
 	for name, snippet := range config.Snippets {
 		snippetsMap[name] = &snippet
 	}
+	options, byDisplay := buildSnippetOptions(snippetsMap)
 
-	var options []string
-	snippetMap := make(map[string]string)
-	for _, name := range slices.Sorted(maps.Keys(config.Snippets)) {
-		snippet := config.Snippets[name]
-		displayName := name
-		if snippet.Description != "" {
-			displayName = fmt.Sprintf("%s - %s", name, snippet.Description)
-		}
-		if len(snippet.Tags) > 0 {
-			displayName += fmt.Sprintf(" [%s]", strings.Join(snippet.Tags, ", "))
-		}
-		options = append(options, displayName)
-		snippetMap[displayName] = name
-	}
-
-	// Try external selector first (if configured and not forced to use internal)
 	if !forceInternal {
-		selected, err := tryExternalSelector(options, snippetMap)
+		selected, err := tryExternalSelector(options, byDisplay)
 		if err == nil {
 			return selected, nil
 		}
-
-		// Check if user cancelled (don't fallback for cancellation)
 		if isUserCancellation(err) {
 			return "", err
 		}
-
-		// For other errors, we'll fall back to internal selector
+		// fall through to bubbletea selector
 	}
 
-	// Use Bubble Tea selector
-	return selectSnippetWithBubbleTea(snippetsMap, noColor)
+	return selectSnippetWithBubbleTea(options, byDisplay, noColor)
 }
 
 // tryExternalSelector attempts to use configured external selector (like fzf)
@@ -229,9 +221,16 @@ func (e *UserCancellationError) Error() string {
 }
 
 // isUserCancellation checks if an error represents user cancellation
+// from any of the snippet selectors or the variable form.
 func isUserCancellation(err error) bool {
-	_, ok := err.(*UserCancellationError)
-	return ok
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, template.ErrUserCancelled) {
+		return true
+	}
+	var uce *UserCancellationError
+	return errors.As(err, &uce)
 }
 
 // parseSetValues parses --set values into a map
@@ -252,17 +251,13 @@ func parseSetValues(setValues []string) (map[string]string, error) {
 
 // parseKeyValue parses a key=value string
 func parseKeyValue(input string) (string, string, error) {
-	parts := strings.SplitN(input, "=", 2)
-	if len(parts) != 2 {
+	rawKey, rawValue, ok := strings.Cut(input, "=")
+	if !ok {
 		return "", "", fmt.Errorf("expected format key=value, got: %s", input)
 	}
-
-	key := strings.TrimSpace(parts[0])
-	value := strings.TrimSpace(parts[1])
-
+	key := strings.TrimSpace(rawKey)
 	if key == "" {
 		return "", "", fmt.Errorf("key cannot be empty")
 	}
-
-	return key, value, nil
+	return key, strings.TrimSpace(rawValue), nil
 }

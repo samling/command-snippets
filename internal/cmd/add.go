@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -113,29 +114,17 @@ func promptForSnippet() (*models.Snippet, error) {
 	return snippet, nil
 }
 
-func extractVariablesFromCommand(command string) []string {
-	var variables []string
-	words := strings.Fields(command)
+var varTokenPattern = regexp.MustCompile(`<([A-Za-z_][A-Za-z0-9_]*)>`)
 
-	for _, word := range words {
-		if strings.HasPrefix(word, "<") && strings.HasSuffix(word, ">") {
-			varName := strings.Trim(word, "<>")
-			if varName != "" {
-				// Avoid duplicates
-				found := false
-				for _, existing := range variables {
-					if existing == varName {
-						found = true
-						break
-					}
-				}
-				if !found {
-					variables = append(variables, varName)
-				}
-			}
+func extractVariablesFromCommand(command string) []string {
+	matches := varTokenPattern.FindAllStringSubmatch(command, -1)
+	variables := make([]string, 0, len(matches))
+	for _, m := range matches {
+		name := m[1]
+		if !slices.Contains(variables, name) {
+			variables = append(variables, name)
 		}
 	}
-
 	return variables
 }
 

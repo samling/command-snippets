@@ -2,16 +2,13 @@ package cmd
 
 import (
 	"fmt"
-	"maps"
 	"os"
-	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
-	"github.com/samling/command-snippets/internal/models"
-	"golang.org/x/term"
+
+	"github.com/samling/command-snippets/internal/template"
 )
 
 // Style definitions for the selector
@@ -37,7 +34,6 @@ var (
 
 // selectorModel represents a snippet selector
 type selectorModel struct {
-	snippets   map[string]*models.Snippet
 	options    []string
 	snippetMap map[string]string // maps display name to snippet name
 	cursor     int
@@ -46,29 +42,11 @@ type selectorModel struct {
 	done       bool
 }
 
-// newSelectorModel creates a new selector model
-func newSelectorModel(snippets map[string]*models.Snippet) selectorModel {
-	var options []string
-	snippetMap := make(map[string]string)
-	for _, name := range slices.Sorted(maps.Keys(snippets)) {
-		snippet := snippets[name]
-		displayName := name
-		if snippet.Description != "" {
-			displayName = fmt.Sprintf("%s - %s", name, snippet.Description)
-		}
-		if len(snippet.Tags) > 0 {
-			displayName += fmt.Sprintf(" [%s]", strings.Join(snippet.Tags, ", "))
-		}
-
-		options = append(options, displayName)
-		snippetMap[displayName] = name
-	}
-
+// newSelectorModel creates a new selector model from prebuilt display options.
+func newSelectorModel(options []string, snippetMap map[string]string) selectorModel {
 	return selectorModel{
-		snippets:   snippets,
 		options:    options,
 		snippetMap: snippetMap,
-		cursor:     0,
 	}
 }
 
@@ -158,25 +136,14 @@ func (m selectorModel) View() string {
 }
 
 // selectSnippetWithBubbleTea shows an interactive snippet selector using Bubble Tea
-func selectSnippetWithBubbleTea(snippets map[string]*models.Snippet, noColor bool) (string, error) {
-	if len(snippets) == 0 {
+func selectSnippetWithBubbleTea(options []string, snippetMap map[string]string, noColor bool) (string, error) {
+	if len(options) == 0 {
 		return "", fmt.Errorf("no templates found")
 	}
 
-	// Force color output when stderr is a TTY (even in subshells), unless --no-color
-	if !noColor && term.IsTerminal(int(os.Stderr.Fd())) {
-		// Detect the best color profile for the terminal
-		output := termenv.NewOutput(os.Stderr)
-		lipgloss.SetColorProfile(output.Profile)
-	} else if noColor {
-		// Disable colors
-		lipgloss.SetColorProfile(termenv.Ascii)
-	}
+	template.SetupColorProfile(noColor)
 
-	model := newSelectorModel(snippets)
-
-	// Run with alternate screen for better UX
-	// Use stderr for the TUI so stdout can be captured for command output
+	model := newSelectorModel(options, snippetMap)
 	p := tea.NewProgram(model,
 		tea.WithAltScreen(),
 		tea.WithOutput(os.Stderr))
@@ -189,6 +156,5 @@ func selectSnippetWithBubbleTea(snippets map[string]*models.Snippet, noColor boo
 	if selector.cancelled {
 		return "", &UserCancellationError{"user cancelled selection"}
 	}
-
 	return selector.selected, nil
 }

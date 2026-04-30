@@ -19,7 +19,8 @@ const (
 
 // Processor handles snippet template processing
 type Processor struct {
-	config *models.Config
+	config  *models.Config
+	NoColor bool
 }
 
 // NewProcessor creates a new template processor
@@ -57,7 +58,7 @@ func (p *Processor) ExecuteWithModeAndPresets(snippet *models.Snippet, mode Exec
 		// Show command with prefix, then ask for confirmation
 		fmt.Fprintf(os.Stderr, "Command: %s\n", command)
 
-		confirm, err := promptForConfirmation("Execute this command?")
+		confirm, err := promptForConfirmation("Execute this command?", p.NoColor)
 		if err != nil {
 			return err
 		}
@@ -78,8 +79,7 @@ func (p *Processor) ProcessSnippet(snippet *models.Snippet, values map[string]st
 
 // promptForVariablesWithPresets interactively prompts for snippet variables, using preset values where available
 func (p *Processor) promptForVariablesWithPresets(snippet *models.Snippet, presetValues map[string]string) (map[string]string, error) {
-	// Use Bubble Tea form for prompting
-	return promptForVariablesWithBubbleTea(snippet, presetValues, p.config)
+	return promptForVariablesWithBubbleTea(snippet, presetValues, p.config, p.NoColor)
 }
 
 // executeCommand runs the command through the user's shell so quoting,
