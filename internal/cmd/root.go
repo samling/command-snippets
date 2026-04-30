@@ -19,15 +19,20 @@ var (
 	generateConfig bool
 )
 
+// version is overridden at link time via -X. "dev" is the default for
+// `go build` / `go install` invocations without ldflags.
+var version = "dev"
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "cs",
-	Short: "Command Snippets - Advanced command template toolkit with intelligent variable substitution",
+	Use:     "cs",
+	Version: version,
+	Short:   "Command Snippets - Advanced command template toolkit with intelligent variable substitution",
 	Long: `CS (Command Snippets) is a powerful CLI tool for managing command templates with advanced variable substitution.
 
 Features:
 - Intelligent template-based variable transformation
-- Conditional logic and smart defaults  
+- Conditional logic and smart defaults
 - Interactive template execution
 - Reusable transformation patterns
 - Tag-based organization

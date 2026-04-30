@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -42,7 +41,8 @@ jobs:
           CGO_ENABLED: 0
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags="-w -s" -o "dist/cs${{ matrix.ext }}" ./cmd/cs
+          ldflags="-w -s -X github.com/samling/command-snippets/internal/cmd.version=${GITHUB_REF_NAME}"
+          go build -trimpath -ldflags="${ldflags}" -o "dist/cs${{ matrix.ext }}" ./cmd/cs
 
       - name: Package
         working-directory: dist
@@ -78,5 +78,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
           fail_on_unmatched_files: true
