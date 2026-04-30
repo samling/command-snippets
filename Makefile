@@ -10,7 +10,9 @@ CONFIG_DIR=$(HOME)/.config/cs
 # Go build flags
 GOOS=$(shell go env GOOS)
 GOARCH=$(shell go env GOARCH)
-LDFLAGS=-w -s
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION_PKG=github.com/samling/command-snippets/internal/cmd
+LDFLAGS=-w -s -X $(VERSION_PKG).version=$(VERSION)
 BUILD_FLAGS=-trimpath -ldflags="$(LDFLAGS)"
 
 # Default target
