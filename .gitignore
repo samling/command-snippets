@@ -69,3 +69,9 @@ hooks
 objects
 refs
 .vscode
+
+# Devshell
+.direnv/
+.data/
+result
+result-*

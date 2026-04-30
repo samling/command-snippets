@@ -1,22 +1,27 @@
 package template
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
-	"text/template"
 
 	"github.com/samling/command-snippets/internal/models"
 	"github.com/samling/command-snippets/internal/regex"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 	"golang.org/x/term"
 )
 
-// NoColor is a global flag to disable colors in the TUI
-var NoColor bool
+// ErrUserCancelled is returned when the user dismisses the variable form
+// (Ctrl+C / Esc). Callers should treat it as a clean exit, not an error.
+var ErrUserCancelled = errors.New("user cancelled")
+
+// placeholderPattern matches <name> tokens used by the snippet command
+// template — must stay in sync with models.placeholderPattern.
+var placeholderPattern = regexp.MustCompile(`<([A-Za-z_][A-Za-z0-9_]*)>`)
 
 // wrapLines takes a slice of lines and wraps any that exceed the given width
 func wrapLines(lines []string, maxWidth int) []string {
@@ -143,7 +148,7 @@ func newFormModel(snippet *models.Snippet, presetValues map[string]string, confi
 		}
 
 		// Set up enum options for boolean or enum fields
-		if variable.Type == "boolean" {
+		if variable.Type == models.VarTypeBoolean {
 			field.enumOptions = []string{"false", "true"}
 			// Set default value for boolean if not specified
 			if field.value == "" {
@@ -286,7 +291,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+u":
 			// Scroll regex pane up (show earlier content)
-			if currentField.variable.Type == "regex" && currentField.value != "" && m.showRegexPane {
+			if currentField.variable.Type == models.VarTypeRegex && currentField.value != "" && m.showRegexPane {
 				m.regexPaneScrollUp -= 5
 				if m.regexPaneScrollUp < 0 {
 					m.regexPaneScrollUp = 0
@@ -296,7 +301,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+d":
 			// Scroll regex pane down (show later content)
-			if currentField.variable.Type == "regex" && currentField.value != "" && m.showRegexPane && m.height > 0 && m.width >= 100 {
+			if currentField.variable.Type == models.VarTypeRegex && currentField.value != "" && m.showRegexPane && m.height > 0 && m.width >= 100 {
 				// Calculate max scroll to prevent scrolling past content
 				// Must use same calculation as View()
 				formWidth := int(float64(m.width) * 0.6)
@@ -494,73 +499,25 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// applyTransformation applies variable transformations for preview purposes
-func (m formModel) applyTransformation(variable models.Variable, value string, allValues map[string]string) string {
-	// Determine which transform to use
-	var transform *models.Transform
-
-	// Use transformTemplate if specified
-	if variable.TransformTemplate != "" && m.config != nil {
-		if tmplDef, exists := m.config.TransformTemplates[variable.TransformTemplate]; exists {
-			transform = tmplDef.Transform
+// previewVariable applies the variable's transform for display in the
+// command preview. Errors are swallowed and surface as either the raw value
+// or its default — this is a best-effort live preview, not the canonical
+// path used by ProcessTemplate.
+func (m formModel) previewVariable(variable models.Variable, value string, allValues map[string]string) string {
+	if m.snippet == nil {
+		if value == "" {
+			return variable.DefaultValue
 		}
-	} else if variable.Transform != nil {
-		transform = variable.Transform
+		return value
 	}
-
-	// Handle computed variables with compose first
-	if variable.Computed && transform != nil && transform.Compose != "" {
-		tmpl, err := template.New("compose").Parse(transform.Compose)
-		if err != nil {
-			// On error, return empty string for preview
-			return ""
+	result, err := m.snippet.ProcessVariable(variable, value, allValues, m.config)
+	if err != nil {
+		if value == "" {
+			return variable.DefaultValue
 		}
-
-		var buf strings.Builder
-		if err := tmpl.Execute(&buf, allValues); err != nil {
-			// On error, return empty string for preview
-			return ""
-		}
-		return buf.String()
+		return value
 	}
-
-	// Handle transformations
-	if transform != nil {
-		// Boolean transformations
-		if variable.Type == "boolean" {
-			if value == "true" || value == "yes" || value == "1" {
-				return transform.TrueValue
-			}
-			return transform.FalseValue
-		}
-
-		// Regular transformations
-		if value == "" && transform.EmptyValue != "" {
-			return transform.EmptyValue
-		} else if value != "" && transform.ValuePattern != "" {
-			// Use Go template for value pattern
-			tmpl, err := template.New("transform").Parse(transform.ValuePattern)
-			if err != nil {
-				// Fallback to simple replacement on error
-				return strings.ReplaceAll(transform.ValuePattern, "{{.Value}}", value)
-			}
-
-			var buf strings.Builder
-			data := map[string]string{"Value": value}
-			if err := tmpl.Execute(&buf, data); err != nil {
-				// Fallback to simple replacement on error
-				return strings.ReplaceAll(transform.ValuePattern, "{{.Value}}", value)
-			}
-			return buf.String()
-		}
-	}
-
-	// Use default value if empty
-	if value == "" {
-		return variable.DefaultValue
-	}
-
-	return value
+	return result
 }
 
 // renderCommandPreview generates a preview of the command with current values
@@ -569,62 +526,49 @@ func (m formModel) renderCommandPreview() string {
 		return ""
 	}
 
-	command := m.snippet.Command
-	result := command
-
-	// Build a map of variable values for quick lookup (only non-computed variables)
-	valueMap := make(map[string]string)
-	filledMap := make(map[string]bool)
+	valueMap := make(map[string]string, len(m.fields))
+	filledMap := make(map[string]bool, len(m.fields))
 	for _, field := range m.fields {
 		valueMap[field.variable.Name] = field.value
 		filledMap[field.variable.Name] = field.value != ""
 	}
 
-	// Replace each variable placeholder with styled version
-	for _, variable := range m.snippet.Variables {
-		placeholder := fmt.Sprintf("<%s>", variable.Name)
+	varByName := make(map[string]*models.Variable, len(m.snippet.Variables))
+	for i := range m.snippet.Variables {
+		v := &m.snippet.Variables[i]
+		varByName[v.Name] = v
+	}
 
-		if !strings.Contains(result, placeholder) {
-			continue
+	result := placeholderPattern.ReplaceAllStringFunc(m.snippet.Command, func(match string) string {
+		name := match[1 : len(match)-1]
+		variable, ok := varByName[name]
+		if !ok {
+			return match
 		}
 
-		// For computed variables, we don't have a raw value from fields
 		rawValue := ""
 		isFilled := false
 		if !variable.Computed {
-			rawValue = valueMap[variable.Name]
-			isFilled = filledMap[variable.Name]
+			rawValue = valueMap[name]
+			isFilled = filledMap[name]
 		}
+		transformedValue := m.previewVariable(*variable, rawValue, valueMap)
 
-		// Apply transformations to get the actual value that would be used
-		transformedValue := m.applyTransformation(variable, rawValue, valueMap)
-
-		// Create the styled replacement
-		var replacement string
-		if variable.Computed {
-			// For computed variables, show the result or placeholder
+		switch {
+		case variable.Computed:
 			if transformedValue != "" {
-				// Successfully computed - show in green
-				replacement = filledVarStyle.Render(transformedValue)
-			} else {
-				// Computation failed or dependencies not ready - show placeholder in orange
-				replacement = unfilledVarStyle.Render(placeholder)
+				return filledVarStyle.Render(transformedValue)
 			}
-		} else if transformedValue != "" {
-			// Show transformed value in green if non-empty
-			replacement = filledVarStyle.Render(transformedValue)
-		} else if isFilled && rawValue != "" {
-			// Field is filled but transformation produced empty string - show nothing (empty)
-			replacement = ""
-		} else {
-			// Show placeholder if empty and not filled
-			replacement = unfilledVarStyle.Render(placeholder)
+			return unfilledVarStyle.Render(match)
+		case transformedValue != "":
+			return filledVarStyle.Render(transformedValue)
+		case isFilled && rawValue != "":
+			return ""
+		default:
+			return unfilledVarStyle.Render(match)
 		}
+	})
 
-		result = strings.ReplaceAll(result, placeholder, replacement)
-	}
-
-	// Build the preview box
 	var b strings.Builder
 	b.WriteString(commandPreviewTitleStyle.Render("Command Preview:"))
 	b.WriteString("\n")
@@ -658,7 +602,7 @@ func (m formModel) View() string {
 	var showPane bool
 	if m.focusIndex >= 0 && m.focusIndex < len(m.fields) {
 		currentField := m.fields[m.focusIndex]
-		if currentField.variable.Type == "regex" && currentField.value != "" && m.showRegexPane {
+		if currentField.variable.Type == models.VarTypeRegex && currentField.value != "" && m.showRegexPane {
 			regexExplanation = regex.ExplainRegexPattern(currentField.value)
 			// Only show pane if terminal is wide enough (at least 100 chars)
 			showPane = m.width >= 100
@@ -809,7 +753,7 @@ func (m formModel) View() string {
 		currentField := m.fields[m.focusIndex]
 		if len(currentField.enumOptions) > 0 {
 			helpText = helpStyle.Render("Tab/↑↓: Navigate  ←→: Select  Enter: Submit  Esc: Cancel")
-		} else if currentField.variable.Type == "regex" {
+		} else if currentField.variable.Type == models.VarTypeRegex {
 			// Show regex-specific help
 			paneStatus := "on"
 			if !m.showRegexPane {
@@ -943,7 +887,7 @@ func (m formModel) getValues() map[string]string {
 }
 
 // promptForVariablesWithBubbleTea shows a Bubble Tea form for all variables
-func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[string]string, config *models.Config) (map[string]string, error) {
+func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[string]string, config *models.Config, noColor bool) (map[string]string, error) {
 	// Check if there are any non-computed variables that need user input
 	hasUserVariables := false
 	for _, variable := range snippet.Variables {
@@ -958,15 +902,7 @@ func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[s
 		return make(map[string]string), nil
 	}
 
-	// Force color output when stderr is a TTY (even in subshells), unless --no-color
-	if !NoColor && term.IsTerminal(int(os.Stderr.Fd())) {
-		// Detect the best color profile for the terminal
-		output := termenv.NewOutput(os.Stderr)
-		lipgloss.SetColorProfile(output.Profile)
-	} else if NoColor {
-		// Disable colors
-		lipgloss.SetColorProfile(termenv.Ascii)
-	}
+	SetupColorProfile(noColor)
 
 	// Get terminal width for wrapping
 	width, _, _ := term.GetSize(int(os.Stderr.Fd()))
@@ -991,7 +927,7 @@ func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[s
 	// Check if cancelled
 	form := finalModel.(formModel)
 	if form.cancelled {
-		return nil, fmt.Errorf("form cancelled")
+		return nil, ErrUserCancelled
 	}
 
 	// Return the values

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,11 +41,10 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	}
 
 	snippetName := args[0]
-	snippet, exists := config.Snippets[snippetName]
-	if !exists {
-		return fmt.Errorf("template '%s' not found", snippetName)
+	snippet, err := getSnippet(snippetName)
+	if err != nil {
+		return err
 	}
-
 	return editSnippet(snippetName, &snippet)
 }
 
@@ -113,9 +113,5 @@ func editSnippet(name string, snippet *models.Snippet) error {
 }
 
 func getEditor() string {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
-	}
-	return editor
+	return cmp.Or(os.Getenv("EDITOR"), "vi")
 }

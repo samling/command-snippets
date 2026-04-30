@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/samling/command-snippets/internal/models"
 
@@ -136,102 +137,115 @@ func loadConfig(filename string) (*models.Config, error) {
 	return &cfg, nil
 }
 
-// loadAdditionalConfigs loads and merges additional configuration files
+// loadAdditionalConfigs loads and merges additional configuration files.
+// Files are read and parsed in parallel; merging stays serial so the
+// "overwrite" warnings remain in deterministic order.
 func loadAdditionalConfigs(cfg *models.Config, configDir string) error {
 	baseDir := filepath.Dir(configDir)
 
-	// Load additional configuration files
+	var paths []string
 	for _, additionalPath := range cfg.Settings.AdditionalConfigs {
 		configPath := expandPath(additionalPath)
 		if !filepath.IsAbs(configPath) {
 			configPath = filepath.Join(baseDir, configPath)
 		}
 
-		// Expand glob patterns
 		matches, err := filepath.Glob(configPath)
 		if err != nil {
 			return fmt.Errorf("invalid glob pattern %s: %w", configPath, err)
 		}
-
 		if len(matches) == 0 {
-			// If no matches found, treat as a literal path and check if it exists
-			if err := loadConfigFile(cfg, configPath); err != nil {
-				if os.IsNotExist(err) {
-					fmt.Printf("Warning: Additional config file not found: %s\n", configPath)
-					continue
-				}
-				return fmt.Errorf("loading additional config file %s: %w", configPath, err)
-			}
+			paths = append(paths, configPath)
 		} else {
-			// Process all matched files
-			for _, matchedFile := range matches {
-				if err := loadConfigFile(cfg, matchedFile); err != nil {
-					if os.IsNotExist(err) {
-						fmt.Printf("Warning: Additional config file not found: %s\n", matchedFile)
-						continue
-					}
-					return fmt.Errorf("loading additional config file %s: %w", matchedFile, err)
-				}
-			}
+			paths = append(paths, matches...)
 		}
 	}
 
+	type loaded struct {
+		path string
+		cfg  models.Config
+		err  error
+	}
+	results := make([]loaded, len(paths))
+	var wg sync.WaitGroup
+	for i, p := range paths {
+		wg.Add(1)
+		go func(i int, p string) {
+			defer wg.Done()
+			results[i].path = p
+			results[i].cfg, results[i].err = readConfigFile(p)
+		}(i, p)
+	}
+	wg.Wait()
+
+	for _, r := range results {
+		if r.err != nil {
+			if os.IsNotExist(r.err) {
+				fmt.Printf("Warning: Additional config file not found: %s\n", r.path)
+				continue
+			}
+			return fmt.Errorf("loading additional config file %s: %w", r.path, r.err)
+		}
+		mergeConfig(cfg, &r.cfg, r.path, models.SourceGlobal)
+	}
 	return nil
 }
 
-// loadConfigFile loads a config file and merges it into the main config
-func loadConfigFile(cfg *models.Config, filename string) error {
-	return loadConfigFileWithSource(cfg, filename, models.SourceGlobal)
+// readConfigFile reads and parses a YAML config file without merging.
+func readConfigFile(filename string) (models.Config, error) {
+	var c models.Config
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return c, err
+	}
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return c, err
+	}
+	return c, nil
 }
 
+// loadConfigFileWithSource reads, parses, and merges a config file in one step.
+// Used for the local .csnippets path where parallelism doesn't apply.
 func loadConfigFileWithSource(cfg *models.Config, filename string, source models.SnippetSource) error {
-	data, err := os.ReadFile(filename)
+	additionalConfig, err := readConfigFile(filename)
 	if err != nil {
 		return err
 	}
+	mergeConfig(cfg, &additionalConfig, filename, source)
+	return nil
+}
 
-	var additionalConfig models.Config
-	if err := yaml.Unmarshal(data, &additionalConfig); err != nil {
-		return err
+// mergeConfig merges src into dst. Snippets gain the given source label.
+func mergeConfig(dst, src *models.Config, filename string, source models.SnippetSource) {
+	if dst.TransformTemplates == nil {
+		dst.TransformTemplates = make(map[string]models.TransformTemplate)
+	}
+	if dst.VariableTypes == nil {
+		dst.VariableTypes = make(map[string]models.VariableType)
+	}
+	if dst.Snippets == nil {
+		dst.Snippets = make(map[string]models.Snippet)
 	}
 
-	// Initialize maps if they don't exist in the main config
-	if cfg.TransformTemplates == nil {
-		cfg.TransformTemplates = make(map[string]models.TransformTemplate)
-	}
-	if cfg.VariableTypes == nil {
-		cfg.VariableTypes = make(map[string]models.VariableType)
-	}
-	if cfg.Snippets == nil {
-		cfg.Snippets = make(map[string]models.Snippet)
-	}
-
-	// Merge transform templates
-	for name, template := range additionalConfig.TransformTemplates {
-		if _, exists := cfg.TransformTemplates[name]; exists {
+	for name, template := range src.TransformTemplates {
+		if _, exists := dst.TransformTemplates[name]; exists {
 			fmt.Printf("Warning: Transform template '%s' from %s overwrites existing template\n", name, filename)
 		}
-		cfg.TransformTemplates[name] = template
+		dst.TransformTemplates[name] = template
 	}
-
-	// Merge variable types
-	for name, varType := range additionalConfig.VariableTypes {
-		if _, exists := cfg.VariableTypes[name]; exists {
+	for name, varType := range src.VariableTypes {
+		if _, exists := dst.VariableTypes[name]; exists {
 			fmt.Printf("Warning: Variable type '%s' from %s overwrites existing type\n", name, filename)
 		}
-		cfg.VariableTypes[name] = varType
+		dst.VariableTypes[name] = varType
 	}
-
-	// Merge snippets with source tracking
-	for name, snippet := range additionalConfig.Snippets {
-		if _, exists := cfg.Snippets[name]; exists {
+	for name, snippet := range src.Snippets {
+		if _, exists := dst.Snippets[name]; exists {
 			fmt.Printf("Warning: Snippet '%s' from %s overwrites existing snippet\n", name, filename)
 		}
-		snippet.Source = source // Set the source for this snippet
-		cfg.Snippets[name] = snippet
+		snippet.Source = source
+		dst.Snippets[name] = snippet
 	}
-
-	return nil
 }
 
 // loadLocalSnippets loads snippets from a local .csnippets file in the current directory

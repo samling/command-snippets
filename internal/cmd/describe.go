@@ -33,10 +33,9 @@ Examples:
 func runDescribe(cmd *cobra.Command, args []string) error {
 	snippetName := args[0]
 
-	// Find the snippet
-	snippet, exists := config.Snippets[snippetName]
-	if !exists {
-		return fmt.Errorf("template '%s' not found", snippetName)
+	snippet, err := getSnippet(snippetName)
+	if err != nil {
+		return err
 	}
 
 	// Display snippet information
@@ -73,79 +72,41 @@ func displayVariable(variable models.Variable) {
 	if variable.Description != "" {
 		fmt.Printf("    Description: %s\n", variable.Description)
 	}
-
 	if variable.Type != "" {
 		fmt.Printf("    Type: %s\n", variable.Type)
 	}
-
 	if variable.DefaultValue != "" {
 		fmt.Printf("    Default: %s\n", variable.DefaultValue)
 	}
-
 	if variable.Required {
 		fmt.Printf("    Required: true\n")
 	}
-
 	if variable.Computed {
 		fmt.Printf("    Computed: true\n")
-		if variable.Transform != nil && variable.Transform.Compose != "" {
-			// Format multiline compose template with proper indentation
-			composeLines := strings.Split(strings.TrimSpace(variable.Transform.Compose), "\n")
-			if len(composeLines) == 1 {
-				// Single line
-				fmt.Printf("    Compose: %s\n", composeLines[0])
-			} else {
-				// Multi-line - show as a block
-				fmt.Printf("    Compose: |\n")
-				for _, line := range composeLines {
-					fmt.Printf("      %s\n", line)
-				}
-			}
-		}
 	}
 
 	if variable.TransformTemplate != "" {
 		fmt.Printf("    Transform Template: %s\n", variable.TransformTemplate)
-
-		// Show transform template details if available
-		if template, exists := config.TransformTemplates[variable.TransformTemplate]; exists {
-			if template.Description != "" {
-				fmt.Printf("      Description: %s\n", template.Description)
+		if t, exists := config.TransformTemplates[variable.TransformTemplate]; exists {
+			if t.Description != "" {
+				fmt.Printf("      Description: %s\n", t.Description)
+			}
+			if t.Transform != nil {
+				displayTransform(t.Transform, "      ")
 			}
 		}
 	}
 
-	// Show inline transform details
 	if variable.Transform != nil {
-		if variable.Transform.EmptyValue != "" {
-			fmt.Printf("    Empty Value: %s\n", variable.Transform.EmptyValue)
-		}
-		if variable.Transform.ValuePattern != "" {
-			fmt.Printf("    Value Pattern: %s\n", variable.Transform.ValuePattern)
-		}
-		if variable.Transform.TrueValue != "" {
-			fmt.Printf("    True Value: %s\n", variable.Transform.TrueValue)
-		}
-		if variable.Transform.FalseValue != "" {
-			fmt.Printf("    False Value: %s\n", variable.Transform.FalseValue)
-		}
+		fmt.Printf("    Transform:\n")
+		displayTransform(variable.Transform, "      ")
 	}
 
-	// Show validation rules
 	if variable.Validation != nil {
 		fmt.Printf("    Validation:\n")
-		if len(variable.Validation.Enum) > 0 {
-			fmt.Printf("      Allowed values: %s\n", strings.Join(variable.Validation.Enum, ", "))
-		}
-		if len(variable.Validation.Range) == 2 {
-			fmt.Printf("      Range: %d - %d\n", variable.Validation.Range[0], variable.Validation.Range[1])
-		}
-		if variable.Validation.Pattern != "" {
-			fmt.Printf("      Pattern: %s\n", variable.Validation.Pattern)
-		}
+		displayValidation(variable.Validation, "      ")
 	}
 
-	// Show type-based validation from config
 	if variable.Type != "" {
 		if varType, exists := config.VariableTypes[variable.Type]; exists {
 			if varType.Description != "" {
@@ -156,15 +117,7 @@ func displayVariable(variable models.Variable) {
 			}
 			if varType.Validation != nil {
 				fmt.Printf("    Type Validation:\n")
-				if len(varType.Validation.Enum) > 0 {
-					fmt.Printf("      Allowed values: %s\n", strings.Join(varType.Validation.Enum, ", "))
-				}
-				if len(varType.Validation.Range) == 2 {
-					fmt.Printf("      Range: %d - %d\n", varType.Validation.Range[0], varType.Validation.Range[1])
-				}
-				if varType.Validation.Pattern != "" {
-					fmt.Printf("      Pattern: %s\n", varType.Validation.Pattern)
-				}
+				displayValidation(varType.Validation, "      ")
 			}
 		}
 	}

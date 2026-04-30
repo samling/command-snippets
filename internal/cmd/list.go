@@ -2,7 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/samling/command-snippets/internal/models"
@@ -117,30 +118,9 @@ func runList(filterTags []string, verbose bool, showLocal bool, showGlobal bool)
 }
 
 func displaySnippetGroup(snippets map[string]models.Snippet, verbose bool) {
-	// Get all snippet names and sort them alphabetically
-	var names []string
-	for name := range snippets {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	// Iterate through sorted names
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(snippets)) {
 		snippet := snippets[name]
-
-		// Basic display
-		fmt.Printf("• %s", name)
-
-		if snippet.Description != "" {
-			fmt.Printf(" - %s", snippet.Description)
-		}
-
-		// Show tags
-		if len(snippet.Tags) > 0 {
-			fmt.Printf(" [%s]", strings.Join(snippet.Tags, ", "))
-		}
-
-		fmt.Println()
+		fmt.Printf("• %s\n", snippetSummary(name, &snippet))
 
 		// Verbose mode shows more details
 		if verbose {
@@ -172,13 +152,11 @@ func displaySnippetGroup(snippets map[string]models.Snippet, verbose bool) {
 	}
 }
 
-// hasAnyTag checks if any of the filterTags exist in the snippet tags
+// hasAnyTag checks if any of the filterTags exist in the snippet tags (case-insensitive).
 func hasAnyTag(snippetTags, filterTags []string) bool {
 	for _, filterTag := range filterTags {
-		for _, snippetTag := range snippetTags {
-			if strings.EqualFold(snippetTag, filterTag) {
-				return true
-			}
+		if slices.ContainsFunc(snippetTags, func(t string) bool { return strings.EqualFold(t, filterTag) }) {
+			return true
 		}
 	}
 	return false

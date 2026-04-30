@@ -2,7 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/samling/command-snippets/internal/models"
@@ -54,14 +55,7 @@ func showTransforms() error {
 
 	fmt.Printf("Transform Templates:\n\n")
 
-	// Get all transform template names and sort them alphabetically
-	var names []string
-	for name := range config.TransformTemplates {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	// Display each transform template
+	names := slices.Sorted(maps.Keys(config.TransformTemplates))
 	for i, name := range names {
 		if i > 0 {
 			fmt.Println() // Add spacing between templates
@@ -90,14 +84,7 @@ func showTypes() error {
 
 	fmt.Printf("Variable Types:\n\n")
 
-	// Get all variable type names and sort them alphabetically
-	var names []string
-	for name := range config.VariableTypes {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	// Display each variable type
+	names := slices.Sorted(maps.Keys(config.VariableTypes))
 	for i, name := range names {
 		if i > 0 {
 			fmt.Println() // Add spacing between types
@@ -134,11 +121,7 @@ func showConfig() error {
 	// Transform templates count
 	fmt.Printf("Transform Templates: %d\n", len(config.TransformTemplates))
 	if len(config.TransformTemplates) > 0 {
-		var names []string
-		for name := range config.TransformTemplates {
-			names = append(names, name)
-		}
-		sort.Strings(names)
+		names := slices.Sorted(maps.Keys(config.TransformTemplates))
 		fmt.Printf("  - %s\n", strings.Join(names, "\n  - "))
 	}
 
@@ -147,11 +130,7 @@ func showConfig() error {
 	// Variable types count
 	fmt.Printf("Variable Types: %d\n", len(config.VariableTypes))
 	if len(config.VariableTypes) > 0 {
-		var names []string
-		for name := range config.VariableTypes {
-			names = append(names, name)
-		}
-		sort.Strings(names)
+		names := slices.Sorted(maps.Keys(config.VariableTypes))
 		fmt.Printf("  - %s\n", strings.Join(names, "\n  - "))
 	}
 
@@ -160,12 +139,7 @@ func showConfig() error {
 	// Snippets count
 	fmt.Printf("Snippets: %d\n", len(config.Snippets))
 	if len(config.Snippets) > 0 {
-		var names []string
-		for name := range config.Snippets {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		// Show first few, then count if there are many
+		names := slices.Sorted(maps.Keys(config.Snippets))
 		if len(names) <= 10 {
 			fmt.Printf("  - %s\n", strings.Join(names, "\n  - "))
 		} else {
