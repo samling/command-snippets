@@ -212,7 +212,7 @@ snippets:
 
 `${namespace_arg}` inserts a computed value, while `${flag("-n", namespace)}` evaluates an expression inline. Extra spaces from empty interpolations are normalized for commands using the new syntax.
 
-When `computed` is present, every `${...}` sequence in the command is treated as template interpolation. Shell parameter expansions such as `${HOME}` or `${FOO:-bar}` should be escaped, avoided, or moved into computed/raw text. Without top-level `computed`, legacy shell `${...}` sequences are preserved unchanged.
+When `computed` is present, every `${...}` sequence in the command is treated as template interpolation. Avoid shell parameter expansions such as `${HOME}` or `${FOO:-bar}` in commands with top-level `computed`; write shell variable references without braces when possible, such as `$HOME`, or omit top-level `computed` for legacy shell-expansion snippets. Without top-level `computed`, legacy shell `${...}` sequences are preserved unchanged.
 
 ### Choices
 
