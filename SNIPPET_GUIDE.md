@@ -11,6 +11,7 @@ This guide provides comprehensive documentation for creating command snippets in
   - [Variable Types](#variable-types)
   - [Validation](#validation)
   - [Default Values](#default-values)
+- [Friendlier Template Syntax](#friendlier-template-syntax)
 - [Transformations](#transformations)
   - [Inline Transformations](#inline-transformations)
   - [Transform Templates](#transform-templates)
@@ -46,13 +47,14 @@ Every snippet consists of these top-level fields:
 |-------|------|-------------|
 | `name` | string | Display name for the snippet (usually same as the YAML key) |
 | `description` | string | Human-readable description of what the command does |
-| `command` | string | The command template with `<variable>` placeholders |
+| `command` | string | The command template with `<variable>` placeholders and `${...}` interpolation |
 
 ### Optional Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `variables` | array | List of variable definitions (see [Variables](#variables)) |
+| `computed` | object | Top-level computed values for `${...}` interpolation |
 | `tags` | array | Tags for organizing and searching snippets |
 
 ### Example: Complete Snippet Structure
@@ -91,6 +93,9 @@ Variables are placeholders in your command template denoted by `<variable_name>`
 | `required` | boolean | If true, user must provide a value (default: false) |
 | `default` | string | Default value if user provides no input |
 | `type` | string | Variable type (see [Variable Types](#variable-types)) |
+| `choices` | array | Selectable values; also validates input like an enum |
+| `visible_if` | string | Expression that decides when a variable is shown and used |
+| `required_if` | string | Expression that makes a visible variable required |
 | `validation` | object | Validation rules (see [Validation](#validation)) |
 | `transform` | object | Inline transformation rules (see [Transformations](#transformations)) |
 | `transformTemplate` | string | Reference to a reusable transform template |
@@ -169,6 +174,117 @@ variables:
 ```
 
 If a user presses Enter without typing, the default value is used.
+
+## Friendlier Template Syntax
+
+Use `${...}` interpolation for readable command templates and top-level `computed` values. Interpolation accepts variable names or expressions:
+
+```yaml
+snippets:
+  kubectl-get-pods:
+    name: "kubectl-get-pods"
+    description: "Get pods with namespace and output options"
+    command: "kubectl get pods ${namespace_arg} ${output_arg}"
+    variables:
+      - name: "namespace_mode"
+        choices: ["none", "all", "named"]
+        default: "none"
+      - name: "namespace"
+        default: "default"
+        visible_if: 'namespace_mode == "named"'
+        required_if: 'namespace_mode == "named"'
+      - name: "output"
+        choices: ["", "wide", "yaml", "json"]
+    computed:
+      namespace_arg:
+        cases:
+          - when: 'namespace_mode == "all"'
+            value: "-A"
+          - when: 'namespace_mode == "named"'
+            value: '${flag("-n", namespace)}'
+          - default: true
+            value: ""
+      output_arg:
+        value: 'flag("-o", output)'
+```
+
+`${namespace_arg}` inserts a computed value, while `${flag("-n", namespace)}` evaluates an expression inline. Extra spaces from empty interpolations are normalized for commands using the new syntax.
+
+### Choices
+
+Use `choices` for simple selectors:
+
+```yaml
+variables:
+  - name: "output"
+    choices: ["", "wide", "yaml", "json"]
+```
+
+Choices also validate input, similar to `validation.enum`.
+
+### Conditional Visibility And Required Fields
+
+Use `visible_if` to show a variable only when an expression is true. Hidden variables are omitted from the rendered command, including their defaults.
+
+Use `required_if` when a variable is only required in some modes:
+
+```yaml
+variables:
+  - name: "namespace"
+    default: "default"
+    visible_if: 'namespace_mode == "named"'
+    required_if: 'namespace_mode == "named"'
+```
+
+### Top-Level Computed Values
+
+Top-level `computed` entries create reusable values for `${...}` interpolation.
+
+A simple `value` is an expression:
+
+```yaml
+computed:
+  output_arg:
+    value: 'flag("-o", output)'
+```
+
+`cases` choose the first matching `when`. A case `value` is interpolation text, so wrap helper calls in `${...}`:
+
+```yaml
+computed:
+  namespace_arg:
+    cases:
+      - when: 'namespace_mode == "all"'
+        value: "-A"
+      - when: 'namespace_mode == "named"'
+        value: '${flag("-n", namespace)}'
+      - default: true
+        value: ""
+```
+
+### Expression Helpers
+
+These helpers are available in `${...}`, computed `value`, computed case expressions, `visible_if`, and `required_if` where expressions are evaluated:
+
+| Helper | Example | Result |
+|--------|---------|--------|
+| `flag(name, value)` | `flag("-o", output)` | `-o json` when `output` is `json`, otherwise empty |
+| `boolFlag(name, enabled)` | `boolFlag("--verbose", verbose)` | `--verbose` when truthy, otherwise empty |
+| `quote(value)` | `quote("hello world")` | `'hello world'` |
+| `join(values, sep)` | `join([namespace_arg, output_arg], " ")` | non-empty values joined with a separator |
+| `default(value, fallback)` | `default(output, "wide")` | fallback when value is empty |
+| `empty(value)` | `empty(output)` | true when value is empty or whitespace |
+
+`flag` shell-quotes unsafe values automatically. For example, `flag("--name", "hello world")` renders `--name 'hello world'`.
+
+### Advanced Compatibility
+
+Existing syntax still works for advanced snippets and compatibility:
+
+- `<name>` command placeholders.
+- Variable-level `transform` rules such as `empty_value`, `value_pattern`, `true_value`, and `false_value`.
+- Reusable `transform_template` definitions.
+- Go-template `compose` for legacy computed variables.
 
 ## Transformations
 
@@ -900,4 +1016,3 @@ If you have questions or need help:
 4. Review the example files in this guide
 
 Happy snippet creation! 🚀
-

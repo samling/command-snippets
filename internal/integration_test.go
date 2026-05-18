@@ -145,6 +145,90 @@ func TestEndToEnd_KubernetesWorkflow(t *testing.T) {
 	}
 }
 
+func TestEndToEnd_NewTemplateSyntax(t *testing.T) {
+	snippet := models.Snippet{
+		Command: "kubectl get pods ${namespace_arg} ${output_arg}",
+		Variables: []models.Variable{
+			{Name: "namespace_mode", Choices: []string{"none", "all", "named"}},
+			{Name: "namespace", VisibleIf: `namespace_mode == "named"`, RequiredIf: `namespace_mode == "named"`},
+			{Name: "output", Choices: []string{"", "wide", "yaml", "json"}},
+		},
+		Computed: map[string]models.ComputedValue{
+			"namespace_arg": {
+				Cases: []models.ComputedCase{
+					{When: `namespace_mode == "all"`, Value: "-A"},
+					{When: `namespace_mode == "named"`, Value: `${flag("-n", namespace)}`},
+					{Default: true, Value: ""},
+				},
+			},
+			"output_arg": {Value: `flag("-o", output)`},
+		},
+	}
+
+	processor := template.NewProcessor(&models.Config{})
+
+	t.Run("named namespace with output", func(t *testing.T) {
+		result, err := processor.ProcessSnippet(&snippet, map[string]string{
+			"namespace_mode": "named",
+			"namespace":      "default",
+			"output":         "json",
+		})
+		if err != nil {
+			t.Fatalf("ProcessSnippet failed: %v", err)
+		}
+		if result != "kubectl get pods -n default -o json" {
+			t.Fatalf("got %q", result)
+		}
+	})
+
+	t.Run("all namespaces without output", func(t *testing.T) {
+		result, err := processor.ProcessSnippet(&snippet, map[string]string{
+			"namespace_mode": "all",
+			"output":         "",
+		})
+		if err != nil {
+			t.Fatalf("ProcessSnippet failed: %v", err)
+		}
+		if result != "kubectl get pods -A" {
+			t.Fatalf("got %q", result)
+		}
+	})
+
+	t.Run("hidden namespace default does not leak with all namespaces", func(t *testing.T) {
+		snippetWithDefault := snippet
+		snippetWithDefault.Variables = append([]models.Variable(nil), snippet.Variables...)
+		snippetWithDefault.Variables[1].DefaultValue = "default"
+
+		result, err := processor.ProcessSnippet(&snippetWithDefault, map[string]string{
+			"namespace_mode": "all",
+			"output":         "",
+		})
+		if err != nil {
+			t.Fatalf("ProcessSnippet failed: %v", err)
+		}
+		if result != "kubectl get pods -A" {
+			t.Fatalf("got %q", result)
+		}
+	})
+
+	t.Run("hidden namespace default does not leak with no namespace", func(t *testing.T) {
+		snippetWithDefault := snippet
+		snippetWithDefault.Variables = append([]models.Variable(nil), snippet.Variables...)
+		snippetWithDefault.Variables[1].DefaultValue = "default"
+
+		result, err := processor.ProcessSnippet(&snippetWithDefault, map[string]string{
+			"namespace_mode": "none",
+			"output":         "",
+		})
+		if err != nil {
+			t.Fatalf("ProcessSnippet failed: %v", err)
+		}
+		if result != "kubectl get pods" {
+			t.Fatalf("got %q", result)
+		}
+	})
+}
+
 // TestEndToEnd_DockerWorkflow tests a Docker-style workflow
 func TestEndToEnd_DockerWorkflow(t *testing.T) {
 	config := loadTestConfig(t)
