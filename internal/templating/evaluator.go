@@ -8,6 +8,17 @@ import (
 	"github.com/expr-lang/expr"
 )
 
+type ComputedValue struct {
+	Value string
+	Cases []ComputedCase
+}
+
+type ComputedCase struct {
+	When    string
+	Value   string
+	Default bool
+}
+
 func EvalBool(expression string, values map[string]string) (bool, error) {
 	if strings.TrimSpace(expression) == "" {
 		return true, nil
@@ -111,6 +122,67 @@ func NormalizeCommandWhitespace(command string) string {
 		}
 	}
 	return strings.TrimSpace(result.String())
+}
+
+func ResolveComputed(computed map[string]ComputedValue, values map[string]string) (map[string]string, error) {
+	resolved := make(map[string]string, len(computed))
+	ctx := make(map[string]string, len(values)+len(computed))
+	for k, v := range values {
+		ctx[k] = v
+	}
+
+	for name, item := range computed {
+		value, err := resolveComputedValue(name, item, ctx)
+		if err != nil {
+			return nil, err
+		}
+		resolved[name] = value
+		ctx[name] = value
+	}
+
+	return resolved, nil
+}
+
+func resolveComputedValue(name string, item ComputedValue, values map[string]string) (string, error) {
+	if len(item.Cases) == 0 {
+		value, err := EvalString(item.Value, values)
+		if err != nil {
+			return "", fmt.Errorf("computed %s value: %w", name, err)
+		}
+		return value, nil
+	}
+
+	defaultIndex := -1
+	for i, computedCase := range item.Cases {
+		if computedCase.Default {
+			if defaultIndex == -1 {
+				defaultIndex = i
+			}
+			continue
+		}
+
+		matched, err := EvalBool(computedCase.When, values)
+		if err != nil {
+			return "", fmt.Errorf("computed %s case %d when: %w", name, i, err)
+		}
+		if matched {
+			value, err := Interpolate(computedCase.Value, values)
+			if err != nil {
+				return "", fmt.Errorf("computed %s case %d value: %w", name, i, err)
+			}
+			return value, nil
+		}
+	}
+
+	if defaultIndex != -1 {
+		value, err := Interpolate(item.Cases[defaultIndex].Value, values)
+		if err != nil {
+			return "", fmt.Errorf("computed %s case %d value: %w", name, defaultIndex, err)
+		}
+		return value, nil
+	}
+
+	return "", nil
 }
 
 func scanInterpolationExpression(input string, start int) (string, int, bool) {

@@ -82,6 +82,36 @@ func TestProcessTemplate_NoVariables(t *testing.T) {
 	}
 }
 
+func TestSnippetComputedYAML(t *testing.T) {
+	data := []byte(`name: kubectl
+description: get pods
+command: kubectl get pods <namespace_arg>
+computed:
+  namespace_arg:
+    cases:
+      - when: namespace_mode == "all"
+        value: -A
+      - default: true
+        value: ${flag("-n", namespace)}
+`)
+
+	var snippet Snippet
+	if err := yaml.Unmarshal(data, &snippet); err != nil {
+		t.Fatalf("Failed to parse snippet: %v", err)
+	}
+
+	computed := snippet.Computed["namespace_arg"]
+	if len(computed.Cases) != 2 {
+		t.Fatalf("got %d computed cases, want 2", len(computed.Cases))
+	}
+	if computed.Cases[0].When != `namespace_mode == "all"` {
+		t.Fatalf("got when %q", computed.Cases[0].When)
+	}
+	if !computed.Cases[1].Default {
+		t.Fatal("second case should be default")
+	}
+}
+
 // TestProcessTemplate_SimpleVariables tests basic variable substitution
 func TestProcessTemplate_SimpleVariables(t *testing.T) {
 	config := loadTestConfig(t)

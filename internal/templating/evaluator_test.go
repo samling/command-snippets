@@ -1,6 +1,9 @@
 package templating
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestHelpers(t *testing.T) {
 	tests := []struct {
@@ -127,5 +130,74 @@ func TestNormalizeWhitespace(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveComputedValue(t *testing.T) {
+	computed := map[string]ComputedValue{
+		"output_arg": {Value: `flag("-o", output)`},
+	}
+	values := map[string]string{"output": "json"}
+	got, err := ResolveComputed(computed, values)
+	if err != nil {
+		t.Fatalf("ResolveComputed returned error: %v", err)
+	}
+	if got["output_arg"] != "-o json" {
+		t.Fatalf("got %q, want %q", got["output_arg"], "-o json")
+	}
+}
+
+func TestResolveComputedCases(t *testing.T) {
+	computed := map[string]ComputedValue{
+		"namespace_arg": {
+			Cases: []ComputedCase{
+				{When: `namespace_mode == "all"`, Value: "-A"},
+				{When: `namespace_mode == "named"`, Value: `${flag("-n", namespace)}`},
+				{Default: true, Value: ""},
+			},
+		},
+	}
+	values := map[string]string{"namespace_mode": "named", "namespace": "default"}
+	got, err := ResolveComputed(computed, values)
+	if err != nil {
+		t.Fatalf("ResolveComputed returned error: %v", err)
+	}
+	if got["namespace_arg"] != "-n default" {
+		t.Fatalf("got %q, want %q", got["namespace_arg"], "-n default")
+	}
+}
+
+func TestResolveComputedDefaultCase(t *testing.T) {
+	computed := map[string]ComputedValue{
+		"namespace_arg": {
+			Cases: []ComputedCase{
+				{When: `namespace_mode == "all"`, Value: "-A"},
+				{Default: true, Value: `${flag("-n", namespace)}`},
+			},
+		},
+	}
+	values := map[string]string{"namespace_mode": "named", "namespace": "default"}
+	got, err := ResolveComputed(computed, values)
+	if err != nil {
+		t.Fatalf("ResolveComputed returned error: %v", err)
+	}
+	if got["namespace_arg"] != "-n default" {
+		t.Fatalf("got %q, want %q", got["namespace_arg"], "-n default")
+	}
+}
+
+func TestResolveComputedCaseNonBoolWhen(t *testing.T) {
+	computed := map[string]ComputedValue{
+		"namespace_arg": {
+			Cases: []ComputedCase{{When: `namespace_mode`, Value: "-A"}},
+		},
+	}
+	values := map[string]string{"namespace_mode": "named"}
+	_, err := ResolveComputed(computed, values)
+	if err == nil {
+		t.Fatal("expected non-bool when error")
+	}
+	if !strings.Contains(err.Error(), "computed namespace_arg case 0") || !strings.Contains(err.Error(), "boolean") {
+		t.Fatalf("error %q should identify computed value, case index, and boolean requirement", err)
 	}
 }

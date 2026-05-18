@@ -41,12 +41,24 @@ var placeholderPattern = regexp.MustCompile(`<([A-Za-z_][A-Za-z0-9_]*)>`)
 
 // Snippet represents a command template
 type Snippet struct {
-	Name        string        `yaml:"name"`
-	Description string        `yaml:"description"`
-	Command     string        `yaml:"command"`
-	Variables   []Variable    `yaml:"variables,omitempty"`
-	Tags        []string      `yaml:"tags,omitempty"`
-	Source      SnippetSource `yaml:"-"` // Not persisted to YAML, set during loading
+	Name        string                   `yaml:"name"`
+	Description string                   `yaml:"description"`
+	Command     string                   `yaml:"command"`
+	Variables   []Variable               `yaml:"variables,omitempty"`
+	Computed    map[string]ComputedValue `yaml:"computed,omitempty"`
+	Tags        []string                 `yaml:"tags,omitempty"`
+	Source      SnippetSource            `yaml:"-"` // Not persisted to YAML, set during loading
+}
+
+type ComputedValue struct {
+	Value string         `yaml:"value,omitempty"`
+	Cases []ComputedCase `yaml:"cases,omitempty"`
+}
+
+type ComputedCase struct {
+	When    string `yaml:"when,omitempty"`
+	Value   string `yaml:"value,omitempty"`
+	Default bool   `yaml:"default,omitempty"`
 }
 
 // Variable defines a template variable with advanced behavior
