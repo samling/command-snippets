@@ -1,6 +1,7 @@
 package template
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -100,5 +101,80 @@ func TestFormEnterValidationIgnoresHiddenRequiredVariable(t *testing.T) {
 	}
 	if form.fields[0].errorMessage != "" {
 		t.Fatalf("visible field error got %q, want empty", form.fields[0].errorMessage)
+	}
+}
+
+func TestFormRefreshRestoresInitiallyHiddenDefault(t *testing.T) {
+	snippet := &models.Snippet{
+		Variables: []models.Variable{
+			{Name: "mode", DefaultValue: "all", Choices: []string{"all", "named"}},
+			{Name: "namespace", DefaultValue: "default", VisibleIf: `mode == "named"`},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	model.fields[0].value = "named"
+	model.refreshVisibleFields()
+
+	if len(model.fields) != 2 {
+		t.Fatalf("got %d fields, want 2", len(model.fields))
+	}
+	if model.fields[1].value != "default" {
+		t.Fatalf("got restored value %q, want default", model.fields[1].value)
+	}
+}
+
+func TestFormRefreshRestoresUserValueAfterHidingAndShowing(t *testing.T) {
+	snippet := &models.Snippet{
+		Variables: []models.Variable{
+			{Name: "mode", DefaultValue: "named", Choices: []string{"all", "named"}},
+			{Name: "namespace", DefaultValue: "default", VisibleIf: `mode == "named"`},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	if len(model.fields) != 2 {
+		t.Fatalf("got %d fields initially, want 2", len(model.fields))
+	}
+	model.fields[1].value = "custom"
+	model.fields[0].value = "all"
+	model.refreshVisibleFields()
+	if len(model.fields) != 1 {
+		t.Fatalf("got %d fields after hiding, want 1", len(model.fields))
+	}
+	if values := model.getValues(); values["namespace"] != "" {
+		t.Fatalf("hidden namespace submitted value got %q, want empty", values["namespace"])
+	}
+
+	model.fields[0].value = "named"
+	model.refreshVisibleFields()
+	if len(model.fields) != 2 {
+		t.Fatalf("got %d fields after showing, want 2", len(model.fields))
+	}
+	if model.fields[1].value != "custom" {
+		t.Fatalf("got restored value %q, want custom", model.fields[1].value)
+	}
+}
+
+func TestFormRefreshSurfacesInvalidVisibleIf(t *testing.T) {
+	snippet := &models.Snippet{
+		Variables: []models.Variable{
+			{Name: "mode", DefaultValue: "all", Choices: []string{"all", "named"}},
+			{Name: "namespace", VisibleIf: `mode ==`},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	if model.visibilityError == "" {
+		t.Fatal("got empty visibility error, want invalid visible_if error")
+	}
+	if !strings.Contains(model.visibilityError, "namespace") || !strings.Contains(model.visibilityError, "visible_if") {
+		t.Fatalf("visibility error got %q, want variable name and visible_if", model.visibilityError)
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	form := updated.(formModel)
+	if form.done {
+		t.Fatal("form submitted despite invalid visible_if")
 	}
 }

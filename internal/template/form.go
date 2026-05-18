@@ -120,10 +120,12 @@ type formModel struct {
 	snippet           *models.Snippet
 	fields            []formField
 	hiddenValues      map[string]string
+	cachedValues      map[string]string
 	allVariables      []models.Variable
 	focusIndex        int
 	done              bool
 	cancelled         bool
+	visibilityError   string
 	config            *models.Config
 	width             int
 	height            int
@@ -175,6 +177,7 @@ func newFormModel(snippet *models.Snippet, presetValues map[string]string, confi
 	model := formModel{
 		snippet:       snippet,
 		hiddenValues:  make(map[string]string),
+		cachedValues:  make(map[string]string),
 		config:        config,
 		showRegexPane: true, // Show regex pane by default
 	}
@@ -191,7 +194,7 @@ func newFormModel(snippet *models.Snippet, presetValues map[string]string, confi
 			}
 		}
 		model.allVariables = append(model.allVariables, variable)
-		model.hiddenValues[variable.Name] = value
+		model.cachedValues[variable.Name] = value
 	}
 
 	model.refreshVisibleFields()
@@ -199,15 +202,20 @@ func newFormModel(snippet *models.Snippet, presetValues map[string]string, confi
 }
 
 func (m *formModel) refreshVisibleFields() {
-	values := m.getValues()
 	existingFields := make(map[string]formField, len(m.fields))
 	focusedName := ""
 	if m.focusIndex >= 0 && m.focusIndex < len(m.fields) {
 		focusedName = m.fields[m.focusIndex].variable.Name
 	}
 	for _, field := range m.fields {
+		m.cachedValues[field.variable.Name] = field.value
 		existingFields[field.variable.Name] = field
 	}
+	values := make(map[string]string, len(m.cachedValues))
+	for name, value := range m.cachedValues {
+		values[name] = value
+	}
+	m.visibilityError = ""
 
 	fields := make([]formField, 0, len(m.allVariables))
 	hiddenValues := make(map[string]string)
@@ -215,6 +223,7 @@ func (m *formModel) refreshVisibleFields() {
 	for _, variable := range m.allVariables {
 		visible, err := variable.IsVisible(values)
 		if err != nil {
+			m.visibilityError = err.Error()
 			visible = true
 		}
 
@@ -225,7 +234,7 @@ func (m *formModel) refreshVisibleFields() {
 
 		field, exists := existingFields[variable.Name]
 		if !exists {
-			field = newFormField(variable, values[variable.Name])
+			field = newFormField(variable, m.cachedValues[variable.Name])
 		}
 		if field.variable.Name == focusedName {
 			newFocusIndex = len(fields)
@@ -259,6 +268,9 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch msg.String() {
 			case "enter":
+				if m.visibilityError != "" {
+					return m, nil
+				}
 				m.done = true
 				return m, tea.Quit
 			case "ctrl+c", "esc":
@@ -453,7 +465,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Submit form if on last field, otherwise move to next
 			if m.focusIndex == len(m.fields)-1 {
 				// Validate all fields before submitting
-				allValid := true
+				allValid := m.visibilityError == ""
 				values := m.getValues()
 				for i := range m.fields {
 					if err := m.fields[i].variable.ValidateVisible(m.fields[i].value, values, m.config); err != nil {

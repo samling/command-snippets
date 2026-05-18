@@ -132,6 +132,27 @@ func TestVariableVisibility(t *testing.T) {
 	}
 }
 
+func TestProcessTemplateOmitsHiddenVariableDefault(t *testing.T) {
+	snippet := Snippet{
+		Command: "kubectl get pods <namespace>",
+		Variables: []Variable{
+			{Name: "mode", DefaultValue: "all"},
+			{Name: "namespace", DefaultValue: "default", VisibleIf: `mode == "named"`},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"mode": "all"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate returned error: %v", err)
+	}
+	if strings.Contains(result, "default") {
+		t.Fatalf("hidden namespace default leaked into result %q", result)
+	}
+	if result != "kubectl get pods " {
+		t.Fatalf("got %q, want %q", result, "kubectl get pods ")
+	}
+}
+
 func TestValidateVisibleWithRequiredIf(t *testing.T) {
 	variable := Variable{Name: "namespace", RequiredIf: `namespace_mode == "named"`}
 	if err := variable.ValidateVisible("", map[string]string{"namespace_mode": "named"}, nil); err == nil {

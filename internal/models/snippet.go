@@ -165,6 +165,15 @@ type SelectorConfig struct {
 func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (string, error) {
 	processed := make(map[string]string, len(s.Variables))
 	for _, variable := range s.Variables {
+		visible, err := variable.IsVisible(values)
+		if err != nil {
+			return "", err
+		}
+		if !visible {
+			processed[variable.Name] = ""
+			continue
+		}
+
 		result, err := s.ProcessVariable(variable, values[variable.Name], values, config)
 		if err != nil {
 			return "", fmt.Errorf("processing variable %s: %w", variable.Name, err)
