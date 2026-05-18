@@ -55,3 +55,41 @@ func TestQuoteShellEscapesSensitiveValues(t *testing.T) {
 		})
 	}
 }
+
+func TestEvalBool(t *testing.T) {
+	ctx := map[string]string{"mode": "advanced", "output": "json"}
+	got, err := EvalBool(`mode == "advanced" && output in ["json", "yaml"]`, ctx)
+	if err != nil {
+		t.Fatalf("EvalBool returned error: %v", err)
+	}
+	if !got {
+		t.Fatal("expected expression to evaluate true")
+	}
+}
+
+func TestInterpolate(t *testing.T) {
+	ctx := map[string]string{"pattern": "hello world", "file": "app.log"}
+	got, err := Interpolate(`grep ${quote(pattern)} ${file}`, ctx)
+	if err != nil {
+		t.Fatalf("Interpolate returned error: %v", err)
+	}
+	want := `grep 'hello world' app.log`
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestInterpolateUnknownValue(t *testing.T) {
+	_, err := Interpolate(`kubectl get pods ${namespace_arg}`, map[string]string{})
+	if err == nil {
+		t.Fatal("expected unknown value error")
+	}
+}
+
+func TestNormalizeWhitespace(t *testing.T) {
+	got := NormalizeCommandWhitespace("docker run  nginx   --rm")
+	want := "docker run nginx --rm"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
