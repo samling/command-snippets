@@ -112,6 +112,90 @@ computed:
 	}
 }
 
+func TestProcessTemplate_NewInterpolationComputedCases(t *testing.T) {
+	snippet := Snippet{
+		Command: "kubectl get pods ${namespace_arg}",
+		Variables: []Variable{
+			{Name: "namespace_mode", DefaultValue: "none"},
+			{Name: "namespace"},
+		},
+		Computed: map[string]ComputedValue{
+			"namespace_arg": {
+				Cases: []ComputedCase{
+					{When: `namespace_mode == "all"`, Value: "-A"},
+					{When: `namespace_mode == "named"`, Value: `${flag("-n", namespace)}`},
+					{Default: true, Value: ""},
+				},
+			},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"namespace_mode": "named", "namespace": "default"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "kubectl get pods -n default" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_MixedLegacyAndNewRendering(t *testing.T) {
+	snippet := Snippet{
+		Command:   "kubectl get <resource> ${namespace_arg}",
+		Variables: []Variable{{Name: "resource"}, {Name: "namespace"}},
+		Computed: map[string]ComputedValue{
+			"namespace_arg": {Value: `flag("-n", namespace)`},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"resource": "pods", "namespace": "default"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "kubectl get pods -n default" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_ComputedConflictWithLegacyVariableReturnsError(t *testing.T) {
+	snippet := Snippet{
+		Command:   "echo <name> ${name}",
+		Variables: []Variable{{Name: "name"}},
+		Computed: map[string]ComputedValue{
+			"name": {Value: `"computed"`},
+		},
+	}
+
+	_, err := snippet.ProcessTemplate(map[string]string{"name": "legacy"}, nil)
+	if err == nil {
+		t.Fatal("expected computed variable conflict error")
+	}
+}
+
+func TestProcessTemplate_LegacySnippetWithoutNewRenderingPreservesWhitespace(t *testing.T) {
+	snippet := Snippet{
+		Command: "app <enabled> <missing>",
+		Variables: []Variable{
+			{
+				Name: "enabled",
+				Type: VarTypeBoolean,
+				Transform: &Transform{
+					TrueValue:  "--enabled",
+					FalseValue: "",
+				},
+			},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"enabled": "false"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "app  <missing>" {
+		t.Fatalf("got %q", result)
+	}
+}
+
 // TestProcessTemplate_SimpleVariables tests basic variable substitution
 func TestProcessTemplate_SimpleVariables(t *testing.T) {
 	config := loadTestConfig(t)

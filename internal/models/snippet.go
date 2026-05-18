@@ -169,13 +169,45 @@ func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (str
 		processed[variable.Name] = result
 	}
 
-	return placeholderPattern.ReplaceAllStringFunc(s.Command, func(match string) string {
+	rendered := placeholderPattern.ReplaceAllStringFunc(s.Command, func(match string) string {
 		name := match[1 : len(match)-1]
 		if val, ok := processed[name]; ok {
 			return val
 		}
 		return match
-	}), nil
+	})
+
+	if len(s.Computed) == 0 && !strings.Contains(rendered, "${") {
+		return rendered, nil
+	}
+
+	context := make(map[string]string, len(values)+len(processed)+len(s.Computed))
+	for name, value := range values {
+		context[name] = value
+	}
+	for name, value := range processed {
+		context[name] = value
+	}
+
+	for name := range s.Computed {
+		if _, ok := processed[name]; ok {
+			return "", fmt.Errorf("computed variable %s conflicts with legacy variable", name)
+		}
+	}
+
+	computed, err := templating.ResolveComputed(s.Computed, context)
+	if err != nil {
+		return "", err
+	}
+	for name, value := range computed {
+		context[name] = value
+	}
+
+	rendered, err = templating.Interpolate(rendered, context)
+	if err != nil {
+		return "", err
+	}
+	return templating.NormalizeCommandWhitespace(rendered), nil
 }
 
 // ResolveTransform returns the Transform that applies to this variable, either
