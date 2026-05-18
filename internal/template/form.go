@@ -119,6 +119,8 @@ type formField struct {
 type formModel struct {
 	snippet           *models.Snippet
 	fields            []formField
+	hiddenValues      map[string]string
+	allVariables      []models.Variable
 	focusIndex        int
 	done              bool
 	cancelled         bool
@@ -129,71 +131,117 @@ type formModel struct {
 	regexPaneScrollUp int  // Number of lines scrolled up in regex pane
 }
 
+func newFormField(variable models.Variable, value string) formField {
+	field := formField{
+		variable:  variable,
+		value:     value,
+		cursorPos: len(value), // Start cursor at end of value
+		enumIndex: 0,
+	}
+
+	// Set up enum options for boolean, choices, or legacy enum fields.
+	if variable.Type == models.VarTypeBoolean {
+		field.enumOptions = []string{"false", "true"}
+		if field.value == "" {
+			field.value = "false"
+		}
+	} else if len(variable.Choices) > 0 {
+		field.enumOptions = variable.Choices
+	} else if variable.Validation != nil && len(variable.Validation.Enum) > 0 {
+		field.enumOptions = variable.Validation.Enum
+	}
+
+	if field.cursorPos > len(field.value) {
+		field.cursorPos = len(field.value)
+	}
+
+	if len(field.enumOptions) > 0 {
+		for i, option := range field.enumOptions {
+			if option == field.value {
+				field.enumIndex = i
+				break
+			}
+		}
+		if field.enumIndex < len(field.enumOptions) {
+			field.value = field.enumOptions[field.enumIndex]
+		}
+	}
+
+	return field
+}
+
 // newFormModel creates a new form model for the given snippet
 func newFormModel(snippet *models.Snippet, presetValues map[string]string, config *models.Config) formModel {
-	var fields []formField
+	model := formModel{
+		snippet:       snippet,
+		hiddenValues:  make(map[string]string),
+		config:        config,
+		showRegexPane: true, // Show regex pane by default
+	}
 
 	for _, variable := range snippet.Variables {
 		if variable.Computed {
 			continue // Skip computed variables
 		}
 
-		defaultValue := variable.DefaultValue
-
-		field := formField{
-			variable:  variable,
-			value:     defaultValue,
-			cursorPos: len(defaultValue), // Start cursor at end of default value
-			enumIndex: 0,
-		}
-
-		// Set up enum options for boolean or enum fields
-		if variable.Type == models.VarTypeBoolean {
-			field.enumOptions = []string{"false", "true"}
-			// Set default value for boolean if not specified
-			if field.value == "" {
-				field.value = "false"
-			}
-		} else if variable.Validation != nil && len(variable.Validation.Enum) > 0 {
-			field.enumOptions = variable.Validation.Enum
-		}
-
-		// Ensure cursor position is valid
-		if field.cursorPos > len(field.value) {
-			field.cursorPos = len(field.value)
-		}
-
-		// Use preset value if available
+		value := variable.DefaultValue
 		if presetValues != nil {
 			if presetValue, exists := presetValues[variable.Name]; exists {
-				field.value = presetValue
-				field.cursorPos = len(presetValue) // Update cursor position
+				value = presetValue
 			}
 		}
+		model.allVariables = append(model.allVariables, variable)
+		model.hiddenValues[variable.Name] = value
+	}
 
-		// For fields with enum options, set the initial index based on value
-		if len(field.enumOptions) > 0 {
-			for i, option := range field.enumOptions {
-				if option == field.value {
-					field.enumIndex = i
-					break
-				}
-			}
-			// Ensure value is set to a valid option
-			if field.enumIndex < len(field.enumOptions) {
-				field.value = field.enumOptions[field.enumIndex]
-			}
+	model.refreshVisibleFields()
+	return model
+}
+
+func (m *formModel) refreshVisibleFields() {
+	values := m.getValues()
+	existingFields := make(map[string]formField, len(m.fields))
+	focusedName := ""
+	if m.focusIndex >= 0 && m.focusIndex < len(m.fields) {
+		focusedName = m.fields[m.focusIndex].variable.Name
+	}
+	for _, field := range m.fields {
+		existingFields[field.variable.Name] = field
+	}
+
+	fields := make([]formField, 0, len(m.allVariables))
+	hiddenValues := make(map[string]string)
+	newFocusIndex := -1
+	for _, variable := range m.allVariables {
+		visible, err := variable.IsVisible(values)
+		if err != nil {
+			visible = true
 		}
 
+		if !visible {
+			hiddenValues[variable.Name] = ""
+			continue
+		}
+
+		field, exists := existingFields[variable.Name]
+		if !exists {
+			field = newFormField(variable, values[variable.Name])
+		}
+		if field.variable.Name == focusedName {
+			newFocusIndex = len(fields)
+		}
 		fields = append(fields, field)
 	}
 
-	return formModel{
-		snippet:       snippet,
-		fields:        fields,
-		focusIndex:    0,
-		config:        config,
-		showRegexPane: true, // Show regex pane by default
+	m.fields = fields
+	m.hiddenValues = hiddenValues
+	if newFocusIndex >= 0 {
+		m.focusIndex = newFocusIndex
+	} else if m.focusIndex >= len(m.fields) {
+		m.focusIndex = len(m.fields) - 1
+	}
+	if m.focusIndex < 0 {
+		m.focusIndex = 0
 	}
 }
 
@@ -261,6 +309,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			currentField.cursorPos += len(pastedContent)
 			// Reset scroll when pasting
 			m.regexPaneScrollUp = 0
+			m.refreshVisibleFields()
 			return m, nil
 		}
 
@@ -276,6 +325,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			currentField.cursorPos += len(keyStr)
 			// Reset scroll when pasting
 			m.regexPaneScrollUp = 0
+			m.refreshVisibleFields()
 			return m, nil
 		}
 
@@ -375,6 +425,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if currentField.enumIndex > 0 {
 					currentField.enumIndex--
 					currentField.value = currentField.enumOptions[currentField.enumIndex]
+					m.refreshVisibleFields()
 				}
 			} else {
 				// For text fields, move cursor left
@@ -389,6 +440,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if currentField.enumIndex < len(currentField.enumOptions)-1 {
 					currentField.enumIndex++
 					currentField.value = currentField.enumOptions[currentField.enumIndex]
+					m.refreshVisibleFields()
 				}
 			} else {
 				// For text fields, move cursor right
@@ -402,8 +454,9 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusIndex == len(m.fields)-1 {
 				// Validate all fields before submitting
 				allValid := true
+				values := m.getValues()
 				for i := range m.fields {
-					if err := m.fields[i].variable.ValidateWithConfig(m.fields[i].value, m.config); err != nil {
+					if err := m.fields[i].variable.ValidateVisible(m.fields[i].value, values, m.config); err != nil {
 						m.fields[i].errorMessage = err.Error()
 						allValid = false
 					} else {
@@ -428,6 +481,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				currentField.cursorPos--
 				// Reset scroll when modifying content
 				m.regexPaneScrollUp = 0
+				m.refreshVisibleFields()
 			}
 
 		case "delete":
@@ -436,6 +490,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				currentField.value = currentField.value[:currentField.cursorPos] + currentField.value[currentField.cursorPos+1:]
 				// Reset scroll when modifying content
 				m.regexPaneScrollUp = 0
+				m.refreshVisibleFields()
 			}
 
 		case "home", "ctrl+a":
@@ -457,6 +512,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				currentField.cursorPos = 0
 				// Reset scroll when modifying content
 				m.regexPaneScrollUp = 0
+				m.refreshVisibleFields()
 			}
 
 		case "ctrl+y":
@@ -465,6 +521,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				currentField.value = currentField.value[:currentField.cursorPos]
 				// Reset scroll when modifying content
 				m.regexPaneScrollUp = 0
+				m.refreshVisibleFields()
 			}
 
 		case "ctrl+w":
@@ -482,6 +539,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				currentField.cursorPos = wordStart
 				// Reset scroll when modifying content
 				m.regexPaneScrollUp = 0
+				m.refreshVisibleFields()
 			}
 
 		default:
@@ -492,6 +550,7 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				currentField.cursorPos++
 				// Reset scroll when typing
 				m.regexPaneScrollUp = 0
+				m.refreshVisibleFields()
 			}
 		}
 	}
@@ -524,6 +583,14 @@ func (m formModel) previewVariable(variable models.Variable, value string, allVa
 func (m formModel) renderCommandPreview() string {
 	if m.snippet == nil {
 		return ""
+	}
+	if result, err := m.snippet.ProcessTemplate(m.getValues(), m.config); err == nil {
+		var b strings.Builder
+		b.WriteString(commandPreviewTitleStyle.Render("Command Preview:"))
+		b.WriteString("\n")
+		b.WriteString(result)
+
+		return commandPreviewStyle.Render(b.String())
 	}
 
 	valueMap := make(map[string]string, len(m.fields))
@@ -880,6 +947,9 @@ func (m formModel) View() string {
 // getValues returns the form values as a map
 func (m formModel) getValues() map[string]string {
 	values := make(map[string]string)
+	for name, value := range m.hiddenValues {
+		values[name] = value
+	}
 	for _, field := range m.fields {
 		values[field.variable.Name] = field.value
 	}
