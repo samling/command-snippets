@@ -34,3 +34,24 @@ func TestEmptyHelper(t *testing.T) {
 		t.Fatal("non-empty string should not be empty")
 	}
 }
+
+func TestQuoteShellEscapesSensitiveValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "whitespace", value: "hello world", want: "'hello world'"},
+		{name: "dollar", value: "cost $5", want: "'cost $5'"},
+		{name: "backticks", value: "run `date`", want: "'run `date`'"},
+		{name: "single quote", value: "don't", want: "'don'\\''t'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := quote(tt.value); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

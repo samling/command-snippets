@@ -2,7 +2,6 @@ package templating
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -22,7 +21,7 @@ func boolFlag(name string, enabled any) string {
 }
 
 func quote(value any) string {
-	return strconv.Quote(toString(value))
+	return "'" + strings.ReplaceAll(toString(value), "'", "'\\''") + "'"
 }
 
 func joinNonEmpty(values []string, sep string) string {
