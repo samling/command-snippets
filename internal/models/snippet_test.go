@@ -3,6 +3,7 @@ package models
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -109,6 +110,67 @@ computed:
 	}
 	if !computed.Cases[1].Default {
 		t.Fatal("second case should be default")
+	}
+}
+
+func TestVariableVisibility(t *testing.T) {
+	variable := Variable{Name: "namespace", VisibleIf: `namespace_mode == "named"`}
+	visible, err := variable.IsVisible(map[string]string{"namespace_mode": "named"})
+	if err != nil {
+		t.Fatalf("IsVisible returned error: %v", err)
+	}
+	if !visible {
+		t.Fatal("variable should be visible")
+	}
+
+	visible, err = variable.IsVisible(map[string]string{"namespace_mode": "all"})
+	if err != nil {
+		t.Fatalf("IsVisible returned error: %v", err)
+	}
+	if visible {
+		t.Fatal("variable should be hidden")
+	}
+}
+
+func TestValidateVisibleWithRequiredIf(t *testing.T) {
+	variable := Variable{Name: "namespace", RequiredIf: `namespace_mode == "named"`}
+	if err := variable.ValidateVisible("", map[string]string{"namespace_mode": "named"}, nil); err == nil {
+		t.Fatal("expected required_if validation error")
+	}
+	if err := variable.ValidateVisible("", map[string]string{"namespace_mode": "all"}, nil); err != nil {
+		t.Fatalf("did not expect validation error: %v", err)
+	}
+}
+
+func TestVariableChoicesActAsEnumValidation(t *testing.T) {
+	variable := Variable{Name: "namespace_mode", Choices: []string{"all", "named"}}
+	if err := variable.ValidateWithConfig("all", nil); err != nil {
+		t.Fatalf("did not expect choices validation error: %v", err)
+	}
+	if err := variable.ValidateWithConfig("none", nil); err == nil {
+		t.Fatal("expected choices validation error")
+	}
+}
+
+func TestVariableInvalidVisibleIfErrorMentionsVariableAndField(t *testing.T) {
+	variable := Variable{Name: "namespace", VisibleIf: `namespace_mode ==`}
+	_, err := variable.IsVisible(map[string]string{"namespace_mode": "named"})
+	if err == nil {
+		t.Fatal("expected visible_if validation error")
+	}
+	if !strings.Contains(err.Error(), "namespace") || !strings.Contains(err.Error(), "visible_if") {
+		t.Fatalf("error should mention variable name and visible_if, got %q", err.Error())
+	}
+}
+
+func TestVariableInvalidRequiredIfErrorMentionsVariableAndField(t *testing.T) {
+	variable := Variable{Name: "namespace", RequiredIf: `namespace_mode ==`}
+	err := variable.ValidateVisible("", map[string]string{"namespace_mode": "named"}, nil)
+	if err == nil {
+		t.Fatal("expected required_if validation error")
+	}
+	if !strings.Contains(err.Error(), "namespace") || !strings.Contains(err.Error(), "required_if") {
+		t.Fatalf("error should mention variable name and required_if, got %q", err.Error())
 	}
 }
 

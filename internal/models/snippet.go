@@ -63,6 +63,9 @@ type Variable struct {
 	DefaultValue      string      `yaml:"default,omitempty"`
 	Required          bool        `yaml:"required,omitempty"`
 	Type              string      `yaml:"type,omitempty"`
+	Choices           []string    `yaml:"choices,omitempty"`
+	VisibleIf         string      `yaml:"visible_if,omitempty"`
+	RequiredIf        string      `yaml:"required_if,omitempty"`
 	Transform         *Transform  `yaml:"transform,omitempty"`
 	TransformTemplate string      `yaml:"transform_template,omitempty"`
 	Validation        *Validation `yaml:"validation,omitempty"`
@@ -229,6 +232,17 @@ func (v *Variable) ResolveTransform(config *Config) (*Transform, error) {
 	return v.Transform, nil
 }
 
+func (v *Variable) IsVisible(values map[string]string) (bool, error) {
+	if strings.TrimSpace(v.VisibleIf) == "" {
+		return true, nil
+	}
+	visible, err := templating.EvalBool(v.VisibleIf, values)
+	if err != nil {
+		return false, fmt.Errorf("variable %s visible_if: %w", v.Name, err)
+	}
+	return visible, nil
+}
+
 // ProcessVariable applies the variable's transform (if any) to value, using
 // allValues as the binding for compose templates.
 func (s *Snippet) ProcessVariable(variable Variable, value string, allValues map[string]string, config *Config) (string, error) {
@@ -324,8 +338,32 @@ func (v *Variable) Validate(value string) error {
 	return nil
 }
 
+func (v *Variable) ValidateVisible(value string, values map[string]string, config *Config) error {
+	required := v.Required
+	if strings.TrimSpace(v.RequiredIf) != "" {
+		requiredIf, err := templating.EvalBool(v.RequiredIf, values)
+		if err != nil {
+			return fmt.Errorf("variable %s required_if: %w", v.Name, err)
+		}
+		required = required || requiredIf
+	}
+	copy := *v
+	copy.Required = required
+	if len(copy.Choices) > 0 && copy.Validation == nil {
+		copy.Validation = &Validation{Enum: copy.Choices}
+	}
+	return copy.ValidateWithConfig(value, config)
+}
+
 // ValidateWithConfig checks validation criteria using config context (for type-based validation)
 func (v *Variable) ValidateWithConfig(value string, config *Config) error {
+	if len(v.Choices) > 0 {
+		copy := *v
+		copy.Choices = nil
+		copy.Validation = &Validation{Enum: v.Choices}
+		return copy.Validate(value)
+	}
+
 	// First run standard validation
 	if err := v.Validate(value); err != nil {
 		return err
