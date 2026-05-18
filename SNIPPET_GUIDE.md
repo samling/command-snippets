@@ -47,7 +47,7 @@ Every snippet consists of these top-level fields:
 |-------|------|-------------|
 | `name` | string | Display name for the snippet (usually same as the YAML key) |
 | `description` | string | Human-readable description of what the command does |
-| `command` | string | The command template with `<variable>` placeholders and `${...}` interpolation |
+| `command` | string | The command template with `<variable>` placeholders; `${...}` interpolation is enabled when the snippet has top-level `computed` values |
 
 ### Optional Fields
 
@@ -177,7 +177,9 @@ If a user presses Enter without typing, the default value is used.
 
 ## Friendlier Template Syntax
 
-Use `${...}` interpolation for readable command templates and top-level `computed` values. Interpolation accepts variable names or expressions:
+Use `${...}` interpolation for readable command templates with top-level `computed` values. Command interpolation currently runs only when the snippet has a top-level `computed` block; snippets without `computed` preserve shell-style `${...}` text for compatibility.
+
+Interpolation accepts variable names or expressions:
 
 ```yaml
 snippets:
@@ -209,6 +211,8 @@ snippets:
 ```
 
 `${namespace_arg}` inserts a computed value, while `${flag("-n", namespace)}` evaluates an expression inline. Extra spaces from empty interpolations are normalized for commands using the new syntax.
+
+When `computed` is present, every `${...}` sequence in the command is treated as template interpolation. Shell parameter expansions such as `${HOME}` or `${FOO:-bar}` should be escaped, avoided, or moved into computed/raw text. Without top-level `computed`, legacy shell `${...}` sequences are preserved unchanged.
 
 ### Choices
 
