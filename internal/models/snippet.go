@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+
+	"github.com/samling/command-snippets/internal/templating"
 )
 
 // SnippetSource represents where a snippet was loaded from
@@ -50,16 +52,9 @@ type Snippet struct {
 	Source      SnippetSource            `yaml:"-"` // Not persisted to YAML, set during loading
 }
 
-type ComputedValue struct {
-	Value string         `yaml:"value,omitempty"`
-	Cases []ComputedCase `yaml:"cases,omitempty"`
-}
+type ComputedValue = templating.ComputedValue
 
-type ComputedCase struct {
-	When    string `yaml:"when,omitempty"`
-	Value   string `yaml:"value,omitempty"`
-	Default bool   `yaml:"default,omitempty"`
-}
+type ComputedCase = templating.ComputedCase
 
 // Variable defines a template variable with advanced behavior
 type Variable struct {

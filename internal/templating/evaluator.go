@@ -2,6 +2,7 @@ package templating
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -9,14 +10,16 @@ import (
 )
 
 type ComputedValue struct {
-	Value string
-	Cases []ComputedCase
+	// Value is evaluated as an expr expression; quote string literals explicitly.
+	Value string `yaml:"value,omitempty"`
+	// Case values are interpolation text rendered with Interpolate.
+	Cases []ComputedCase `yaml:"cases,omitempty"`
 }
 
 type ComputedCase struct {
-	When    string
-	Value   string
-	Default bool
+	When    string `yaml:"when,omitempty"`
+	Value   string `yaml:"value,omitempty"`
+	Default bool   `yaml:"default,omitempty"`
 }
 
 func EvalBool(expression string, values map[string]string) (bool, error) {
@@ -131,7 +134,14 @@ func ResolveComputed(computed map[string]ComputedValue, values map[string]string
 		ctx[k] = v
 	}
 
-	for name, item := range computed {
+	names := make([]string, 0, len(computed))
+	for name := range computed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		item := computed[name]
 		value, err := resolveComputedValue(name, item, ctx)
 		if err != nil {
 			return nil, err

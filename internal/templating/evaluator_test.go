@@ -147,6 +147,47 @@ func TestResolveComputedValue(t *testing.T) {
 	}
 }
 
+func TestResolveComputedValueRequiresExpression(t *testing.T) {
+	computed := map[string]ComputedValue{
+		"namespace_arg": {Value: "-A"},
+	}
+	_, err := ResolveComputed(computed, nil)
+	if err == nil {
+		t.Fatal("expected unquoted literal expression error")
+	}
+	if !strings.Contains(err.Error(), "computed namespace_arg value") {
+		t.Fatalf("error %q should identify computed value", err)
+	}
+}
+
+func TestResolveComputedSortedDependencies(t *testing.T) {
+	computed := map[string]ComputedValue{
+		"b_arg": {Value: `flag("--b", a_arg)`},
+		"a_arg": {Value: `"alpha"`},
+	}
+	got, err := ResolveComputed(computed, nil)
+	if err != nil {
+		t.Fatalf("ResolveComputed returned error: %v", err)
+	}
+	if got["b_arg"] != "--b alpha" {
+		t.Fatalf("got %q, want %q", got["b_arg"], "--b alpha")
+	}
+}
+
+func TestResolveComputedLaterDependencyErrors(t *testing.T) {
+	computed := map[string]ComputedValue{
+		"a_arg": {Value: `flag("--a", b_arg)`},
+		"b_arg": {Value: `"beta"`},
+	}
+	_, err := ResolveComputed(computed, nil)
+	if err == nil {
+		t.Fatal("expected later dependency error")
+	}
+	if !strings.Contains(err.Error(), "computed a_arg value") || !strings.Contains(err.Error(), "b_arg") {
+		t.Fatalf("error %q should identify computed value and unavailable dependency", err)
+	}
+}
+
 func TestResolveComputedCases(t *testing.T) {
 	computed := map[string]ComputedValue{
 		"namespace_arg": {
