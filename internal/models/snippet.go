@@ -163,17 +163,17 @@ type SelectorConfig struct {
 
 // ProcessTemplate processes a snippet with variable substitution.
 func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (string, error) {
-	visibilityValues := make(map[string]string, len(s.Variables)+len(values))
+	rawValues := make(map[string]string, len(s.Variables)+len(values))
 	for _, variable := range s.Variables {
-		visibilityValues[variable.Name] = variable.DefaultValue
+		rawValues[variable.Name] = variable.DefaultValue
 	}
 	for name, value := range values {
-		visibilityValues[name] = value
+		rawValues[name] = value
 	}
 
 	processed := make(map[string]string, len(s.Variables))
 	for _, variable := range s.Variables {
-		visible, err := variable.IsVisible(visibilityValues)
+		visible, err := variable.IsVisible(rawValues)
 		if err != nil {
 			return "", err
 		}
@@ -182,7 +182,7 @@ func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (str
 			continue
 		}
 
-		result, err := s.ProcessVariable(variable, values[variable.Name], values, config)
+		result, err := s.ProcessVariable(variable, rawValues[variable.Name], rawValues, config)
 		if err != nil {
 			return "", fmt.Errorf("processing variable %s: %w", variable.Name, err)
 		}
@@ -210,11 +210,8 @@ func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (str
 		}
 	}
 
-	context := make(map[string]string, len(values)+len(processed)+len(s.Computed))
-	for name, value := range values {
-		context[name] = value
-	}
-	for name, value := range processed {
+	context := make(map[string]string, len(rawValues)+len(s.Computed))
+	for name, value := range rawValues {
 		context[name] = value
 	}
 

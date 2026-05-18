@@ -194,3 +194,43 @@ func TestFormViewRendersVisibilityError(t *testing.T) {
 		t.Fatalf("view %q does not contain visibility error text %q", view, errorText)
 	}
 }
+
+func TestNewFormModelInitialVisibilityUsesFirstChoiceWhenDefaultEmpty(t *testing.T) {
+	snippet := &models.Snippet{
+		Variables: []models.Variable{
+			{Name: "mode", Choices: []string{"named", "all"}},
+			{Name: "namespace", VisibleIf: `mode == "named"`},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	if len(model.fields) != 2 {
+		t.Fatalf("got %d fields, want 2", len(model.fields))
+	}
+	if model.fields[0].value != "named" {
+		t.Fatalf("got mode value %q, want named", model.fields[0].value)
+	}
+	if model.fields[1].variable.Name != "namespace" {
+		t.Fatalf("got dependent field %q, want namespace", model.fields[1].variable.Name)
+	}
+}
+
+func TestNewFormModelInitialVisibilityUsesNormalizedBooleanDefault(t *testing.T) {
+	snippet := &models.Snippet{
+		Variables: []models.Variable{
+			{Name: "enabled", Type: models.VarTypeBoolean},
+			{Name: "name", VisibleIf: `enabled == "false"`},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	if len(model.fields) != 2 {
+		t.Fatalf("got %d fields, want 2", len(model.fields))
+	}
+	if model.fields[0].value != "false" {
+		t.Fatalf("got enabled value %q, want false", model.fields[0].value)
+	}
+	if model.fields[1].variable.Name != "name" {
+		t.Fatalf("got dependent field %q, want name", model.fields[1].variable.Name)
+	}
+}

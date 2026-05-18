@@ -193,6 +193,7 @@ func newFormModel(snippet *models.Snippet, presetValues map[string]string, confi
 				value = presetValue
 			}
 		}
+		value = newFormField(variable, value).value
 		model.allVariables = append(model.allVariables, variable)
 		model.cachedValues[variable.Name] = value
 	}

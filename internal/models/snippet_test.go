@@ -271,6 +271,57 @@ func TestProcessTemplate_MixedLegacyAndNewRendering(t *testing.T) {
 	}
 }
 
+func TestProcessTemplate_ComputedUsesRawValueWhenLegacyTransformExists(t *testing.T) {
+	snippet := Snippet{
+		Command: "kubectl get pods ${namespace_arg}",
+		Variables: []Variable{
+			{
+				Name: "namespace",
+				Transform: &Transform{
+					ValuePattern: "-n {{.Value}}",
+				},
+			},
+		},
+		Computed: map[string]ComputedValue{
+			"namespace_arg": {Value: `flag("-n", namespace)`},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"namespace": "default"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "kubectl get pods -n default" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_ComputedBoolFlagUsesRawBooleanWhenLegacyTransformExists(t *testing.T) {
+	snippet := Snippet{
+		Command: "app <verbose> ${debug_arg}",
+		Variables: []Variable{
+			{
+				Name: "verbose",
+				Type: VarTypeBoolean,
+				Transform: &Transform{
+					TrueValue: "--verbose",
+				},
+			},
+		},
+		Computed: map[string]ComputedValue{
+			"debug_arg": {Value: `boolFlag("--debug", verbose)`},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"verbose": "true"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "app --verbose --debug" {
+		t.Fatalf("got %q", result)
+	}
+}
+
 func TestProcessTemplate_LegacyShellExpansionWithoutComputedPreservesSimpleExpansion(t *testing.T) {
 	snippet := Snippet{Command: "echo ${HOME}"}
 
