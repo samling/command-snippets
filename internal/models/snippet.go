@@ -361,7 +361,9 @@ func (v *Variable) ValidateWithConfig(value string, config *Config) error {
 		copy := *v
 		copy.Choices = nil
 		copy.Validation = &Validation{Enum: v.Choices}
-		return copy.Validate(value)
+		if err := copy.Validate(value); err != nil {
+			return err
+		}
 	}
 
 	// First run standard validation

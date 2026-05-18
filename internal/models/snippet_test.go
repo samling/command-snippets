@@ -152,6 +152,19 @@ func TestVariableChoicesActAsEnumValidation(t *testing.T) {
 	}
 }
 
+func TestVariableChoicesContinueToTypeValidation(t *testing.T) {
+	variable := Variable{Name: "port", Choices: []string{"abc"}, Type: "test_port"}
+	config := &Config{
+		VariableTypes: map[string]VariableType{
+			"test_port": {Validation: &Validation{Range: []int{1, 65535}}},
+		},
+	}
+
+	if err := variable.ValidateWithConfig("abc", config); err == nil {
+		t.Fatal("expected type validation error")
+	}
+}
+
 func TestVariableInvalidVisibleIfErrorMentionsVariableAndField(t *testing.T) {
 	variable := Variable{Name: "namespace", VisibleIf: `namespace_mode ==`}
 	_, err := variable.IsVisible(map[string]string{"namespace_mode": "named"})
