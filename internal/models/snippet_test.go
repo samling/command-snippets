@@ -157,6 +157,30 @@ func TestProcessTemplate_MixedLegacyAndNewRendering(t *testing.T) {
 	}
 }
 
+func TestProcessTemplate_LegacyShellExpansionWithoutComputedPreservesSimpleExpansion(t *testing.T) {
+	snippet := Snippet{Command: "echo ${HOME}"}
+
+	result, err := snippet.ProcessTemplate(nil, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "echo ${HOME}" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_LegacyShellExpansionWithoutComputedPreservesDefaultExpansion(t *testing.T) {
+	snippet := Snippet{Command: "echo ${FOO:-bar}"}
+
+	result, err := snippet.ProcessTemplate(nil, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "echo ${FOO:-bar}" {
+		t.Fatalf("got %q", result)
+	}
+}
+
 func TestProcessTemplate_ComputedConflictWithLegacyVariableReturnsError(t *testing.T) {
 	snippet := Snippet{
 		Command:   "echo <name> ${name}",
@@ -167,6 +191,20 @@ func TestProcessTemplate_ComputedConflictWithLegacyVariableReturnsError(t *testi
 	}
 
 	_, err := snippet.ProcessTemplate(map[string]string{"name": "legacy"}, nil)
+	if err == nil {
+		t.Fatal("expected computed variable conflict error")
+	}
+}
+
+func TestProcessTemplate_ComputedConflictWithRawInputReturnsError(t *testing.T) {
+	snippet := Snippet{
+		Command: "echo ${name}",
+		Computed: map[string]ComputedValue{
+			"name": {Value: `"computed"`},
+		},
+	}
+
+	_, err := snippet.ProcessTemplate(map[string]string{"name": "raw"}, nil)
 	if err == nil {
 		t.Fatal("expected computed variable conflict error")
 	}

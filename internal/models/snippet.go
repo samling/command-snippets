@@ -177,8 +177,17 @@ func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (str
 		return match
 	})
 
-	if len(s.Computed) == 0 && !strings.Contains(rendered, "${") {
+	if len(s.Computed) == 0 {
 		return rendered, nil
+	}
+
+	for name := range s.Computed {
+		if _, ok := processed[name]; ok {
+			return "", fmt.Errorf("computed variable %s conflicts with legacy variable", name)
+		}
+		if _, ok := values[name]; ok {
+			return "", fmt.Errorf("computed variable %s conflicts with input value", name)
+		}
 	}
 
 	context := make(map[string]string, len(values)+len(processed)+len(s.Computed))
@@ -187,12 +196,6 @@ func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (str
 	}
 	for name, value := range processed {
 		context[name] = value
-	}
-
-	for name := range s.Computed {
-		if _, ok := processed[name]; ok {
-			return "", fmt.Errorf("computed variable %s conflicts with legacy variable", name)
-		}
 	}
 
 	computed, err := templating.ResolveComputed(s.Computed, context)
