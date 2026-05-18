@@ -163,9 +163,17 @@ type SelectorConfig struct {
 
 // ProcessTemplate processes a snippet with variable substitution.
 func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (string, error) {
+	visibilityValues := make(map[string]string, len(s.Variables)+len(values))
+	for _, variable := range s.Variables {
+		visibilityValues[variable.Name] = variable.DefaultValue
+	}
+	for name, value := range values {
+		visibilityValues[name] = value
+	}
+
 	processed := make(map[string]string, len(s.Variables))
 	for _, variable := range s.Variables {
-		visible, err := variable.IsVisible(values)
+		visible, err := variable.IsVisible(visibilityValues)
 		if err != nil {
 			return "", err
 		}

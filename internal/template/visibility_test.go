@@ -178,3 +178,19 @@ func TestFormRefreshSurfacesInvalidVisibleIf(t *testing.T) {
 		t.Fatal("form submitted despite invalid visible_if")
 	}
 }
+
+func TestFormViewRendersVisibilityError(t *testing.T) {
+	snippet := &models.Snippet{
+		Variables: []models.Variable{
+			{Name: "mode", DefaultValue: "all", Choices: []string{"all", "named"}},
+			{Name: "namespace", VisibleIf: `mode ==`},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	view := model.View()
+	errorText := strings.Split(model.visibilityError, "\n")[0]
+	if !strings.Contains(view, errorText) {
+		t.Fatalf("view %q does not contain visibility error text %q", view, errorText)
+	}
+}

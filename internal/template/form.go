@@ -712,6 +712,14 @@ func (m formModel) View() string {
 		formBuilder.WriteString(commandPreview)
 		formBuilder.WriteString("\n")
 	}
+	if m.visibilityError != "" {
+		errorLine := errorStyle.Render("[Error: " + m.visibilityError + "]")
+		if formWidth > 0 {
+			errorLine = lipgloss.NewStyle().Width(formWidth).Render(errorLine)
+		}
+		formBuilder.WriteString(errorLine)
+		formBuilder.WriteString("\n")
+	}
 
 	// Render each field
 	for i := range m.fields {
