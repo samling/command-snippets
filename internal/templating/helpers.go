@@ -10,7 +10,7 @@ func flag(name string, value any) string {
 	if s == "" {
 		return ""
 	}
-	return strings.TrimSpace(name + " " + s)
+	return strings.TrimSpace(name + " " + quoteIfUnsafe(s))
 }
 
 func boolFlag(name string, enabled any) string {
@@ -22,6 +22,15 @@ func boolFlag(name string, enabled any) string {
 
 func quote(value any) string {
 	return "'" + strings.ReplaceAll(toString(value), "'", "'\\''") + "'"
+}
+
+func quoteIfUnsafe(value string) string {
+	for _, r := range value {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune("_@%+=:,./-", r)) {
+			return quote(value)
+		}
+	}
+	return value
 }
 
 func joinNonEmpty(values []string, sep string) string {

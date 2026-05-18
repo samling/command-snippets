@@ -56,6 +56,16 @@ func TestQuoteShellEscapesSensitiveValues(t *testing.T) {
 	}
 }
 
+func TestFlagQuotesUnsafeValues(t *testing.T) {
+	got := flag("--name", "prod; rm -rf /")
+	if got == "--name prod; rm -rf /" {
+		t.Fatal("flag should quote unsafe shell values")
+	}
+	if got != "--name 'prod; rm -rf /'" {
+		t.Fatalf("got %q, want shell-quoted value", got)
+	}
+}
+
 func TestEvalBool(t *testing.T) {
 	ctx := map[string]string{"mode": "advanced", "output": "json"}
 	got, err := EvalBool(`mode == "advanced" && output in ["json", "yaml"]`, ctx)
@@ -79,6 +89,18 @@ func TestInterpolate(t *testing.T) {
 	}
 }
 
+func TestInterpolateBraceInsideQuotedExpression(t *testing.T) {
+	ctx := map[string]string{"pattern": ""}
+	got, err := Interpolate(`x ${default(pattern, "}")} y`, ctx)
+	if err != nil {
+		t.Fatalf("Interpolate returned error: %v", err)
+	}
+	want := `x } y`
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestInterpolateUnknownValue(t *testing.T) {
 	_, err := Interpolate(`kubectl get pods ${namespace_arg}`, map[string]string{})
 	if err == nil {
@@ -87,9 +109,23 @@ func TestInterpolateUnknownValue(t *testing.T) {
 }
 
 func TestNormalizeWhitespace(t *testing.T) {
-	got := NormalizeCommandWhitespace("docker run  nginx   --rm")
-	want := "docker run nginx --rm"
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	tests := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{name: "plain", command: "docker run  nginx   --rm", want: "docker run nginx --rm"},
+		{name: "single quotes", command: "printf 'a  b'  |  cat", want: "printf 'a  b' | cat"},
+		{name: "double quotes", command: `echo "a  b"   done`, want: `echo "a  b" done`},
+		{name: "escaped space", command: `echo a\ b   done`, want: `echo a\ b done`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeCommandWhitespace(tt.command)
+			if got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
