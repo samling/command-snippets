@@ -61,7 +61,7 @@ func writeInitialConfig(configPath string, snippetFiles map[string][]byte, opts 
 	if err != nil {
 		return result, err
 	}
-	if err := writeTrackedFile(configPath, configData, opts.Force, &result); err != nil {
+	if err := writeTrackedFile(configPath, configData, opts, &result); err != nil {
 		return result, err
 	}
 
@@ -73,7 +73,7 @@ func writeInitialConfig(configPath string, snippetFiles map[string][]byte, opts 
 
 	for _, name := range names {
 		path := filepath.Join(filepath.Dir(configPath), "snippets", name)
-		if err := writeTrackedFile(path, snippetFiles[name], opts.Force, &result); err != nil {
+		if err := writeTrackedFile(path, snippetFiles[name], opts, &result); err != nil {
 			return result, err
 		}
 	}
@@ -81,26 +81,36 @@ func writeInitialConfig(configPath string, snippetFiles map[string][]byte, opts 
 	return result, nil
 }
 
-func writeTrackedFile(path string, data []byte, overwrite bool, result *initResult) error {
+func writeTrackedFile(path string, data []byte, opts initOptions, result *initResult) error {
 	_, err := os.Stat(path)
 	exists := err == nil
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
-	if exists && !overwrite {
+	if exists && opts.Force {
+		if err := writeFileIfAllowed(path, data, true); err != nil {
+			return err
+		}
+		result.Overwritten = append(result.Overwritten, path)
+		return nil
+	}
+
+	if exists && opts.Missing {
+		// Missing mode restores absent files only; existing files match default skip behavior.
 		result.Skipped = append(result.Skipped, path)
 		return nil
 	}
 
-	if err := writeFileIfAllowed(path, data, overwrite); err != nil {
+	if exists {
+		result.Skipped = append(result.Skipped, path)
+		return nil
+	}
+
+	if err := writeFileIfAllowed(path, data, false); err != nil {
 		return err
 	}
-	if exists {
-		result.Overwritten = append(result.Overwritten, path)
-	} else {
-		result.Created = append(result.Created, path)
-	}
+	result.Created = append(result.Created, path)
 	return nil
 }
 

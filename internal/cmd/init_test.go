@@ -97,6 +97,22 @@ func TestWriteInitialConfigForceOverwritesFiles(t *testing.T) {
 	assertPaths(t, result.Overwritten, configPath, snippetPath)
 }
 
+func TestWriteTrackedFileMissingSkipsExistingFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	mustWriteFile(t, path, []byte("existing config"))
+
+	var result initResult
+	if err := writeTrackedFile(path, []byte("new config"), initOptions{Missing: true}, &result); err != nil {
+		t.Fatalf("writeTrackedFile() error = %v", err)
+	}
+
+	assertFileContent(t, path, []byte("existing config"))
+	assertPaths(t, result.Created)
+	assertPaths(t, result.Skipped, path)
+	assertPaths(t, result.Overwritten)
+}
+
 func mustDefaultConfigYAML(t *testing.T) []byte {
 	t.Helper()
 	data, err := defaultConfigYAML()
