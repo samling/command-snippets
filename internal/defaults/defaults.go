@@ -2,7 +2,7 @@ package defaults
 
 import (
 	"embed"
-	"path/filepath"
+	"path"
 	"sort"
 )
 
@@ -21,7 +21,7 @@ func SnippetFiles() map[string][]byte {
 			continue
 		}
 		name := entry.Name()
-		data, err := snippetFS.ReadFile(filepath.Join("snippets", name))
+		data, err := snippetFS.ReadFile(path.Join("snippets", name))
 		if err != nil {
 			continue
 		}
