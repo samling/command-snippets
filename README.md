@@ -20,12 +20,14 @@
 git clone https://github.com/samling/command-snippets.git
 cd command-snippets
 
-# Build and install binary + setup config directory
+# Build and install the binary
 make install
 
 # Or install directly with Go
 go install github.com/samling/command-snippets/cmd/cs@latest
 ```
+
+After installing the binary, run `cs init` for first-time setup.
 
 ### First-Time Setup
 
