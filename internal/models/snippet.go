@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+
+	"github.com/samling/command-snippets/internal/templating"
 )
 
 // SnippetSource represents where a snippet was loaded from
@@ -41,13 +43,18 @@ var placeholderPattern = regexp.MustCompile(`<([A-Za-z_][A-Za-z0-9_]*)>`)
 
 // Snippet represents a command template
 type Snippet struct {
-	Name        string        `yaml:"name"`
-	Description string        `yaml:"description"`
-	Command     string        `yaml:"command"`
-	Variables   []Variable    `yaml:"variables,omitempty"`
-	Tags        []string      `yaml:"tags,omitempty"`
-	Source      SnippetSource `yaml:"-"` // Not persisted to YAML, set during loading
+	Name        string                   `yaml:"name"`
+	Description string                   `yaml:"description"`
+	Command     string                   `yaml:"command"`
+	Variables   []Variable               `yaml:"variables,omitempty"`
+	Computed    map[string]ComputedValue `yaml:"computed,omitempty"`
+	Tags        []string                 `yaml:"tags,omitempty"`
+	Source      SnippetSource            `yaml:"-"` // Not persisted to YAML, set during loading
 }
+
+type ComputedValue = templating.ComputedValue
+
+type ComputedCase = templating.ComputedCase
 
 // Variable defines a template variable with advanced behavior
 type Variable struct {
@@ -56,6 +63,10 @@ type Variable struct {
 	DefaultValue      string      `yaml:"default,omitempty"`
 	Required          bool        `yaml:"required,omitempty"`
 	Type              string      `yaml:"type,omitempty"`
+	Choices           []string    `yaml:"choices,omitempty"`
+	EmptyLabel        string      `yaml:"empty_label,omitempty"`
+	VisibleIf         string      `yaml:"visible_if,omitempty"`
+	RequiredIf        string      `yaml:"required_if,omitempty"`
 	Transform         *Transform  `yaml:"transform,omitempty"`
 	TransformTemplate string      `yaml:"transform_template,omitempty"`
 	Validation        *Validation `yaml:"validation,omitempty"`
@@ -153,22 +164,71 @@ type SelectorConfig struct {
 
 // ProcessTemplate processes a snippet with variable substitution.
 func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (string, error) {
+	rawValues := make(map[string]string, len(s.Variables)+len(values))
+	for _, variable := range s.Variables {
+		rawValues[variable.Name] = variable.DefaultValue
+	}
+	for name, value := range values {
+		rawValues[name] = value
+	}
+
 	processed := make(map[string]string, len(s.Variables))
 	for _, variable := range s.Variables {
-		result, err := s.ProcessVariable(variable, values[variable.Name], values, config)
+		visible, err := variable.IsVisible(rawValues)
+		if err != nil {
+			return "", err
+		}
+		if !visible {
+			processed[variable.Name] = ""
+			continue
+		}
+
+		result, err := s.ProcessVariable(variable, rawValues[variable.Name], rawValues, config)
 		if err != nil {
 			return "", fmt.Errorf("processing variable %s: %w", variable.Name, err)
 		}
 		processed[variable.Name] = result
 	}
 
-	return placeholderPattern.ReplaceAllStringFunc(s.Command, func(match string) string {
+	rendered := placeholderPattern.ReplaceAllStringFunc(s.Command, func(match string) string {
 		name := match[1 : len(match)-1]
 		if val, ok := processed[name]; ok {
 			return val
 		}
 		return match
-	}), nil
+	})
+
+	if len(s.Computed) == 0 {
+		return rendered, nil
+	}
+
+	for name := range s.Computed {
+		if _, ok := processed[name]; ok {
+			return "", fmt.Errorf("computed variable %s conflicts with legacy variable", name)
+		}
+		if _, ok := values[name]; ok {
+			return "", fmt.Errorf("computed variable %s conflicts with input value", name)
+		}
+	}
+
+	context := make(map[string]string, len(rawValues)+len(s.Computed))
+	for name, value := range rawValues {
+		context[name] = value
+	}
+
+	computed, err := templating.ResolveComputed(s.Computed, context)
+	if err != nil {
+		return "", err
+	}
+	for name, value := range computed {
+		context[name] = value
+	}
+
+	rendered, err = templating.Interpolate(rendered, context)
+	if err != nil {
+		return "", err
+	}
+	return templating.NormalizeCommandWhitespace(rendered), nil
 }
 
 // ResolveTransform returns the Transform that applies to this variable, either
@@ -185,6 +245,17 @@ func (v *Variable) ResolveTransform(config *Config) (*Transform, error) {
 		return nil, fmt.Errorf("transform template '%s' not found", v.TransformTemplate)
 	}
 	return v.Transform, nil
+}
+
+func (v *Variable) IsVisible(values map[string]string) (bool, error) {
+	if strings.TrimSpace(v.VisibleIf) == "" {
+		return true, nil
+	}
+	visible, err := templating.EvalBool(v.VisibleIf, values)
+	if err != nil {
+		return false, fmt.Errorf("variable %s visible_if: %w", v.Name, err)
+	}
+	return visible, nil
 }
 
 // ProcessVariable applies the variable's transform (if any) to value, using
@@ -282,8 +353,34 @@ func (v *Variable) Validate(value string) error {
 	return nil
 }
 
+func (v *Variable) ValidateVisible(value string, values map[string]string, config *Config) error {
+	required := v.Required
+	if strings.TrimSpace(v.RequiredIf) != "" {
+		requiredIf, err := templating.EvalBool(v.RequiredIf, values)
+		if err != nil {
+			return fmt.Errorf("variable %s required_if: %w", v.Name, err)
+		}
+		required = required || requiredIf
+	}
+	copy := *v
+	copy.Required = required
+	if len(copy.Choices) > 0 && copy.Validation == nil {
+		copy.Validation = &Validation{Enum: copy.Choices}
+	}
+	return copy.ValidateWithConfig(value, config)
+}
+
 // ValidateWithConfig checks validation criteria using config context (for type-based validation)
 func (v *Variable) ValidateWithConfig(value string, config *Config) error {
+	if len(v.Choices) > 0 {
+		copy := *v
+		copy.Choices = nil
+		copy.Validation = &Validation{Enum: v.Choices}
+		if err := copy.Validate(value); err != nil {
+			return err
+		}
+	}
+
 	// First run standard validation
 	if err := v.Validate(value); err != nil {
 		return err

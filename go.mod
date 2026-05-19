@@ -6,6 +6,7 @@ require (
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/expr-lang/expr v1.17.8
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.1
 	golang.org/x/term v0.35.0

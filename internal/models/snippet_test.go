@@ -3,6 +3,7 @@ package models
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -79,6 +80,322 @@ func TestProcessTemplate_NoVariables(t *testing.T) {
 	expected := "echo Hello World"
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+func TestSnippetComputedYAML(t *testing.T) {
+	data := []byte(`name: kubectl
+description: get pods
+command: kubectl get pods <namespace_arg>
+computed:
+  namespace_arg:
+    cases:
+      - when: namespace_mode == "all"
+        value: -A
+      - default: true
+        value: ${flag("-n", namespace)}
+`)
+
+	var snippet Snippet
+	if err := yaml.Unmarshal(data, &snippet); err != nil {
+		t.Fatalf("Failed to parse snippet: %v", err)
+	}
+
+	computed := snippet.Computed["namespace_arg"]
+	if len(computed.Cases) != 2 {
+		t.Fatalf("got %d computed cases, want 2", len(computed.Cases))
+	}
+	if computed.Cases[0].When != `namespace_mode == "all"` {
+		t.Fatalf("got when %q", computed.Cases[0].When)
+	}
+	if !computed.Cases[1].Default {
+		t.Fatal("second case should be default")
+	}
+}
+
+func TestVariableVisibility(t *testing.T) {
+	variable := Variable{Name: "namespace", VisibleIf: `namespace_mode == "named"`}
+	visible, err := variable.IsVisible(map[string]string{"namespace_mode": "named"})
+	if err != nil {
+		t.Fatalf("IsVisible returned error: %v", err)
+	}
+	if !visible {
+		t.Fatal("variable should be visible")
+	}
+
+	visible, err = variable.IsVisible(map[string]string{"namespace_mode": "all"})
+	if err != nil {
+		t.Fatalf("IsVisible returned error: %v", err)
+	}
+	if visible {
+		t.Fatal("variable should be hidden")
+	}
+}
+
+func TestProcessTemplateOmitsHiddenVariableDefault(t *testing.T) {
+	snippet := Snippet{
+		Command: "kubectl get pods <namespace>",
+		Variables: []Variable{
+			{Name: "mode", DefaultValue: "all"},
+			{Name: "namespace", DefaultValue: "default", VisibleIf: `mode == "named"`},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"mode": "all"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate returned error: %v", err)
+	}
+	if strings.Contains(result, "default") {
+		t.Fatalf("hidden namespace default leaked into result %q", result)
+	}
+	if result != "kubectl get pods " {
+		t.Fatalf("got %q, want %q", result, "kubectl get pods ")
+	}
+}
+
+func TestProcessTemplateUsesDefaultsForVisibilityContext(t *testing.T) {
+	snippet := Snippet{
+		Command: "kubectl get pods <namespace>",
+		Variables: []Variable{
+			{Name: "mode", DefaultValue: "named"},
+			{Name: "namespace", VisibleIf: `mode == "named"`},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"namespace": "dev"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate returned error: %v", err)
+	}
+	if result != "kubectl get pods dev" {
+		t.Fatalf("got %q, want %q", result, "kubectl get pods dev")
+	}
+}
+
+func TestValidateVisibleWithRequiredIf(t *testing.T) {
+	variable := Variable{Name: "namespace", RequiredIf: `namespace_mode == "named"`}
+	if err := variable.ValidateVisible("", map[string]string{"namespace_mode": "named"}, nil); err == nil {
+		t.Fatal("expected required_if validation error")
+	}
+	if err := variable.ValidateVisible("", map[string]string{"namespace_mode": "all"}, nil); err != nil {
+		t.Fatalf("did not expect validation error: %v", err)
+	}
+}
+
+func TestVariableChoicesActAsEnumValidation(t *testing.T) {
+	variable := Variable{Name: "namespace_mode", Choices: []string{"all", "named"}}
+	if err := variable.ValidateWithConfig("all", nil); err != nil {
+		t.Fatalf("did not expect choices validation error: %v", err)
+	}
+	if err := variable.ValidateWithConfig("none", nil); err == nil {
+		t.Fatal("expected choices validation error")
+	}
+}
+
+func TestVariableChoicesContinueToTypeValidation(t *testing.T) {
+	variable := Variable{Name: "port", Choices: []string{"abc"}, Type: "test_port"}
+	config := &Config{
+		VariableTypes: map[string]VariableType{
+			"test_port": {Validation: &Validation{Range: []int{1, 65535}}},
+		},
+	}
+
+	if err := variable.ValidateWithConfig("abc", config); err == nil {
+		t.Fatal("expected type validation error")
+	}
+}
+
+func TestVariableInvalidVisibleIfErrorMentionsVariableAndField(t *testing.T) {
+	variable := Variable{Name: "namespace", VisibleIf: `namespace_mode ==`}
+	_, err := variable.IsVisible(map[string]string{"namespace_mode": "named"})
+	if err == nil {
+		t.Fatal("expected visible_if validation error")
+	}
+	if !strings.Contains(err.Error(), "namespace") || !strings.Contains(err.Error(), "visible_if") {
+		t.Fatalf("error should mention variable name and visible_if, got %q", err.Error())
+	}
+}
+
+func TestVariableInvalidRequiredIfErrorMentionsVariableAndField(t *testing.T) {
+	variable := Variable{Name: "namespace", RequiredIf: `namespace_mode ==`}
+	err := variable.ValidateVisible("", map[string]string{"namespace_mode": "named"}, nil)
+	if err == nil {
+		t.Fatal("expected required_if validation error")
+	}
+	if !strings.Contains(err.Error(), "namespace") || !strings.Contains(err.Error(), "required_if") {
+		t.Fatalf("error should mention variable name and required_if, got %q", err.Error())
+	}
+}
+
+func TestProcessTemplate_NewInterpolationComputedCases(t *testing.T) {
+	snippet := Snippet{
+		Command: "kubectl get pods ${namespace_arg}",
+		Variables: []Variable{
+			{Name: "namespace_mode", DefaultValue: "none"},
+			{Name: "namespace"},
+		},
+		Computed: map[string]ComputedValue{
+			"namespace_arg": {
+				Cases: []ComputedCase{
+					{When: `namespace_mode == "all"`, Value: "-A"},
+					{When: `namespace_mode == "named"`, Value: `${flag("-n", namespace)}`},
+					{Default: true, Value: ""},
+				},
+			},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"namespace_mode": "named", "namespace": "default"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "kubectl get pods -n default" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_MixedLegacyAndNewRendering(t *testing.T) {
+	snippet := Snippet{
+		Command:   "kubectl get <resource> ${namespace_arg}",
+		Variables: []Variable{{Name: "resource"}, {Name: "namespace"}},
+		Computed: map[string]ComputedValue{
+			"namespace_arg": {Value: `flag("-n", namespace)`},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"resource": "pods", "namespace": "default"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "kubectl get pods -n default" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_ComputedUsesRawValueWhenLegacyTransformExists(t *testing.T) {
+	snippet := Snippet{
+		Command: "kubectl get pods ${namespace_arg}",
+		Variables: []Variable{
+			{
+				Name: "namespace",
+				Transform: &Transform{
+					ValuePattern: "-n {{.Value}}",
+				},
+			},
+		},
+		Computed: map[string]ComputedValue{
+			"namespace_arg": {Value: `flag("-n", namespace)`},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"namespace": "default"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "kubectl get pods -n default" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_ComputedBoolFlagUsesRawBooleanWhenLegacyTransformExists(t *testing.T) {
+	snippet := Snippet{
+		Command: "app <verbose> ${debug_arg}",
+		Variables: []Variable{
+			{
+				Name: "verbose",
+				Type: VarTypeBoolean,
+				Transform: &Transform{
+					TrueValue: "--verbose",
+				},
+			},
+		},
+		Computed: map[string]ComputedValue{
+			"debug_arg": {Value: `boolFlag("--debug", verbose)`},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"verbose": "true"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "app --verbose --debug" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_LegacyShellExpansionWithoutComputedPreservesSimpleExpansion(t *testing.T) {
+	snippet := Snippet{Command: "echo ${HOME}"}
+
+	result, err := snippet.ProcessTemplate(nil, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "echo ${HOME}" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_LegacyShellExpansionWithoutComputedPreservesDefaultExpansion(t *testing.T) {
+	snippet := Snippet{Command: "echo ${FOO:-bar}"}
+
+	result, err := snippet.ProcessTemplate(nil, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "echo ${FOO:-bar}" {
+		t.Fatalf("got %q", result)
+	}
+}
+
+func TestProcessTemplate_ComputedConflictWithLegacyVariableReturnsError(t *testing.T) {
+	snippet := Snippet{
+		Command:   "echo <name> ${name}",
+		Variables: []Variable{{Name: "name"}},
+		Computed: map[string]ComputedValue{
+			"name": {Value: `"computed"`},
+		},
+	}
+
+	_, err := snippet.ProcessTemplate(map[string]string{"name": "legacy"}, nil)
+	if err == nil {
+		t.Fatal("expected computed variable conflict error")
+	}
+}
+
+func TestProcessTemplate_ComputedConflictWithRawInputReturnsError(t *testing.T) {
+	snippet := Snippet{
+		Command: "echo ${name}",
+		Computed: map[string]ComputedValue{
+			"name": {Value: `"computed"`},
+		},
+	}
+
+	_, err := snippet.ProcessTemplate(map[string]string{"name": "raw"}, nil)
+	if err == nil {
+		t.Fatal("expected computed variable conflict error")
+	}
+}
+
+func TestProcessTemplate_LegacySnippetWithoutNewRenderingPreservesWhitespace(t *testing.T) {
+	snippet := Snippet{
+		Command: "app <enabled> <missing>",
+		Variables: []Variable{
+			{
+				Name: "enabled",
+				Type: VarTypeBoolean,
+				Transform: &Transform{
+					TrueValue:  "--enabled",
+					FalseValue: "",
+				},
+			},
+		},
+	}
+
+	result, err := snippet.ProcessTemplate(map[string]string{"enabled": "false"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if result != "app  <missing>" {
+		t.Fatalf("got %q", result)
 	}
 }
 

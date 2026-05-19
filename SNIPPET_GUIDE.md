@@ -1,6 +1,6 @@
 # Snippet Creation Guide
 
-This guide provides comprehensive documentation for creating command snippets in CS (Command Snippets). Learn how to build powerful, reusable command templates with intelligent variable substitution, transformations, and validation.
+This guide provides comprehensive documentation for creating command snippets in CS (Command Snippets). Learn how to build powerful, reusable command templates with intelligent variable substitution, computed values, and validation.
 
 ## Table of Contents
 
@@ -11,10 +11,8 @@ This guide provides comprehensive documentation for creating command snippets in
   - [Variable Types](#variable-types)
   - [Validation](#validation)
   - [Default Values](#default-values)
-- [Transformations](#transformations)
-  - [Inline Transformations](#inline-transformations)
-  - [Transform Templates](#transform-templates)
-  - [Computed Variables](#computed-variables)
+- [Friendlier Template Syntax](#friendlier-template-syntax)
+- [Expert Transform Rules](#expert-transform-rules)
 - [Variable Types (Reusable Definitions)](#variable-types-reusable-definitions)
 - [Advanced Examples](#advanced-examples)
 - [Best Practices](#best-practices)
@@ -46,13 +44,14 @@ Every snippet consists of these top-level fields:
 |-------|------|-------------|
 | `name` | string | Display name for the snippet (usually same as the YAML key) |
 | `description` | string | Human-readable description of what the command does |
-| `command` | string | The command template with `<variable>` placeholders |
+| `command` | string | The command template with `<variable>` placeholders; `${...}` interpolation is enabled when the snippet has top-level `computed` values |
 
 ### Optional Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `variables` | array | List of variable definitions (see [Variables](#variables)) |
+| `computed` | object | Top-level computed values for `${...}` interpolation |
 | `tags` | array | Tags for organizing and searching snippets |
 
 ### Example: Complete Snippet Structure
@@ -62,12 +61,24 @@ snippets:
   kubectl-get-pods:
     name: "kubectl-get-pods"
     description: "Get Kubernetes pods with namespace selection"
-    command: "kubectl get pods <namespace>"
+    command: "kubectl get pods ${namespace_arg}"
     variables:
+      - name: "namespace_mode"
+        description: "Namespace mode"
+        choices: ["none", "all", "named"]
+        default: "none"
       - name: "namespace"
-        description: "Kubernetes namespace"
-        type: "namespace"
-        transformTemplate: "k8s-namespace"
+        description: "Namespace name"
+        visible_if: 'namespace_mode == "named"'
+        required_if: 'namespace_mode == "named"'
+    computed:
+      namespace_arg:
+        cases:
+          - when: 'namespace_mode == "all"'
+            value: "-A"
+          - when: 'namespace_mode == "named"'
+            value: '${flag("-n", namespace)}'
+          - default: true
     tags: ["kubernetes", "pods", "kubectl"]
 ```
 
@@ -91,10 +102,14 @@ Variables are placeholders in your command template denoted by `<variable_name>`
 | `required` | boolean | If true, user must provide a value (default: false) |
 | `default` | string | Default value if user provides no input |
 | `type` | string | Variable type (see [Variable Types](#variable-types)) |
+| `choices` | array | Selectable values; also validates input like an enum |
+| `empty_label` | string | Display label for an empty string choice; defaults to `none` |
+| `visible_if` | string | Expression that decides when a variable is shown and used |
+| `required_if` | string | Expression that makes a visible variable required |
 | `validation` | object | Validation rules (see [Validation](#validation)) |
-| `transform` | object | Inline transformation rules (see [Transformations](#transformations)) |
-| `transformTemplate` | string | Reference to a reusable transform template |
-| `computed` | boolean | If true, value is computed from other variables (default: false) |
+| `transform` | object | Expert variable-level transform rules (see [Expert Transform Rules](#expert-transform-rules)) |
+| `transform_template` | string | Reference to a reusable expert transform template |
+| `computed` | boolean | Expert variable-level computed value (default: false) |
 
 ### Variable Types
 
@@ -170,228 +185,196 @@ variables:
 
 If a user presses Enter without typing, the default value is used.
 
-## Transformations
+## Friendlier Template Syntax
 
-Transformations modify how variable values appear in the final command. This is powerful for handling optional flags, conditional logic, and complex formatting.
+Use `${...}` interpolation for readable command templates with top-level `computed` values. Command interpolation currently runs only when the snippet has a top-level `computed` block; snippets without `computed` preserve shell-style `${...}` text for compatibility.
 
-### Inline Transformations
-
-Define transformation logic directly in the variable:
-
-#### Empty Value Transformation
-
-Replace empty input with a specific value:
-
-```yaml
-variables:
-  - name: "namespace"
-    description: "Kubernetes namespace (empty for all)"
-    transform:
-      empty_value: "-A"  # When empty, use "-A" flag
-```
-
-**Usage:**
-```bash
-namespace: [Enter]
-# Result: kubectl get pods -A
-```
-
-#### Value Pattern Transformation
-
-Format non-empty values with a pattern:
-
-```yaml
-variables:
-  - name: "port"
-    description: "Port to expose"
-    transform:
-      empty_value: ""  # No flag when empty
-      value_pattern: "-p {{.Value}}:{{.Value}}"  # Format when provided
-```
-
-**Usage:**
-```bash
-port: 8080
-# Result: docker run -p 8080:8080 nginx
-```
-
-The `{{.Value}}` placeholder is replaced with the user's input.
-
-#### Boolean Transformations
-
-Convert boolean values to command flags:
-
-```yaml
-variables:
-  - name: "follow"
-    description: "Follow logs"
-    type: "boolean"
-    default: "false"
-    transform:
-      true_value: "-f"
-      false_value: ""
-```
-
-**Usage:**
-```bash
-follow: <true>
-# Result: kubectl logs pod-name -f
-
-follow: <false>
-# Result: kubectl logs pod-name
-```
-
-#### Advanced Value Patterns with Go Templates
-
-Use Go template syntax for complex transformations:
-
-```yaml
-variables:
-  - name: "output"
-    description: "Output format"
-    transform:
-      empty_value: ""
-      value_pattern: |
-        {{- if eq .Value "json" -}}
-          -o json
-        {{- else if eq .Value "yaml" -}}
-          -o yaml
-        {{- else -}}
-          -o wide
-        {{- end -}}
-```
-
-### Transform Templates
-
-For reusable transformation logic, define templates in the `transform_templates` section at the config root:
-
-#### Defining Transform Templates
-
-```yaml
-transform_templates:
-  k8s-namespace:
-    description: "Kubernetes namespace: empty=none, 'all'=-A, name=-n <name>"
-    transform:
-      empty_value: ""
-      value_pattern: |
-        {{- if eq .Value "all" -}}
-          -A
-        {{- else -}}
-          -n {{.Value}}
-        {{- end -}}
-
-  docker-port:
-    description: "Docker port mapping (hostport:targetport)"
-    transform:
-      empty_value: ""
-      value_pattern: "-p {{.Value}}:{{.Value}}"
-
-  follow-flag:
-    description: "Follow logs flag"
-    transform:
-      true_value: "-f"
-      false_value: ""
-```
-
-#### Using Transform Templates
-
-Reference templates by name in your variables:
+Interpolation accepts variable names or expressions:
 
 ```yaml
 snippets:
   kubectl-get-pods:
-    command: "kubectl get pods <namespace>"
+    name: "kubectl-get-pods"
+    description: "Get pods with namespace and output options"
+    command: "kubectl get pods ${namespace_arg} ${output_arg}"
     variables:
+      - name: "namespace_mode"
+        choices: ["none", "all", "named"]
+        default: "none"
       - name: "namespace"
-        description: "Kubernetes namespace"
-        transformTemplate: "k8s-namespace"  # Reference the template
+        default: "default"
+        visible_if: 'namespace_mode == "named"'
+        required_if: 'namespace_mode == "named"'
+      - name: "output"
+        choices: ["", "wide", "yaml", "json"]
+    computed:
+      namespace_arg:
+        cases:
+          - when: 'namespace_mode == "all"'
+            value: "-A"
+          - when: 'namespace_mode == "named"'
+            value: '${flag("-n", namespace)}'
+          - default: true
+            value: ""
+      output_arg:
+        value: 'flag("-o", output)'
+```
 
+`${namespace_arg}` inserts a computed value, while `${flag("-n", namespace)}` evaluates an expression inline. Extra spaces from empty interpolations are normalized for commands using the new syntax.
+
+When `computed` is present, every `${...}` sequence in the command is treated as template interpolation. Avoid shell parameter expansions such as `${HOME}` or `${FOO:-bar}` in commands with top-level `computed`; write shell variable references without braces when possible, such as `$HOME`, or omit top-level `computed` for legacy shell-expansion snippets. Without top-level `computed`, legacy shell `${...}` sequences are preserved unchanged.
+
+### Choices
+
+Use `choices` for simple selectors:
+
+```yaml
+variables:
+  - name: "output"
+    choices: ["", "wide", "yaml", "json"]
+```
+
+Choices also validate input, similar to `validation.enum`.
+
+Use an empty string choice when selecting no option should omit a flag. The form displays that choice as `none` by default while keeping the underlying value empty. Set `empty_label` when another label is clearer:
+
+```yaml
+variables:
+  - name: "output"
+    choices: ["", "wide", "yaml", "json"]
+    empty_label: "default"
+computed:
+  output_arg:
+    value: 'flag("-o", output)'
+```
+
+### Conditional Visibility And Required Fields
+
+Use `visible_if` to show a variable only when an expression is true. Hidden variables are omitted from the rendered command, including their defaults.
+
+Use `required_if` when a variable is only required in some modes:
+
+```yaml
+variables:
+  - name: "namespace"
+    default: "default"
+    visible_if: 'namespace_mode == "named"'
+    required_if: 'namespace_mode == "named"'
+```
+
+### Top-Level Computed Values
+
+Top-level `computed` entries create reusable values for `${...}` interpolation.
+
+A simple `value` is an expression:
+
+```yaml
+computed:
+  output_arg:
+    value: 'flag("-o", output)'
+```
+
+`cases` choose the first matching `when`. A case `value` is interpolation text, so wrap helper calls in `${...}`:
+
+```yaml
+computed:
+  namespace_arg:
+    cases:
+      - when: 'namespace_mode == "all"'
+        value: "-A"
+      - when: 'namespace_mode == "named"'
+        value: '${flag("-n", namespace)}'
+      - default: true
+        value: ""
+```
+
+### Expression Helpers
+
+These helpers are available in `${...}`, computed `value`, computed case expressions, `visible_if`, and `required_if` where expressions are evaluated:
+
+| Helper | Example | Result |
+|--------|---------|--------|
+| `flag(name, value)` | `flag("-o", output)` | `-o json` when `output` is `json`, otherwise empty |
+| `boolFlag(name, enabled)` | `boolFlag("--verbose", verbose)` | `--verbose` when truthy, otherwise empty |
+| `quote(value)` | `quote("hello world")` | `'hello world'` |
+| `join(values, sep)` | `join([namespace_arg, output_arg], " ")` | non-empty values joined with a separator |
+| `default(value, fallback)` | `default(output, "wide")` | fallback when value is empty |
+| `empty(value)` | `empty(output)` | true when value is empty or whitespace |
+
+`flag` shell-quotes unsafe values automatically. For example, `flag("--name", "hello world")` renders `--name 'hello world'`.
+
+### Advanced Compatibility
+
+Variable-level transform rules still work for expert snippets and compatibility. Prefer `${...}` interpolation with top-level `computed` for new snippets unless you specifically need reusable Go-template transforms.
+
+- `<name>` command placeholders.
+- Variable-level `transform` rules such as `empty_value`, `value_pattern`, `true_value`, and `false_value`.
+- Reusable `transform_template` definitions for shared Go-template transforms.
+- Go-template `compose` for variable-level computed values.
+
+## Expert Transform Rules
+
+For new snippets, prefer [Friendlier Template Syntax](#friendlier-template-syntax): `${...}` interpolation, expression helpers such as `flag` and `boolFlag`, and top-level `computed` values. Variable-level transforms are still useful when you need Go-template formatting or a shared transform template across many existing snippets.
+
+Inline transforms modify a single `<name>` placeholder:
+
+```yaml
+snippets:
+  kubectl-logs:
+    command: "kubectl logs <pod_name> <follow>"
+    variables:
+      - name: "pod_name"
+        required: true
+      - name: "follow"
+        type: "boolean"
+        transform:
+          true_value: "-f"
+          false_value: ""
+```
+
+`value_pattern` supports Go templates with `{{.Value}}`:
+
+```yaml
+variables:
+  - name: "port"
+    transform:
+      empty_value: ""
+      value_pattern: "-p {{.Value}}:{{.Value}}"
+```
+
+Reusable transform templates live at the config root and are referenced with `transform_template`:
+
+```yaml
+transform_templates:
+  docker-port:
+    description: "Docker port mapping"
+    transform:
+      empty_value: ""
+      value_pattern: "-p {{.Value}}:{{.Value}}"
+
+snippets:
   docker-run:
     command: "docker run <port> <image>"
     variables:
       - name: "port"
-        description: "Port mapping"
-        transformTemplate: "docker-port"  # Reuse across snippets
+        transform_template: "docker-port"
+      - name: "image"
+        required: true
 ```
 
-**Benefits:**
-- Define once, use everywhere
-- Consistent behavior across commands
-- Easier to maintain and update
-
-### Computed Variables
-
-Computed variables are calculated from other variables using the `compose` transformation. They don't prompt the user; instead, they combine values from other fields.
-
-#### Basic Composition
+Variable-level computed values use Go-template `compose` and do not prompt the user:
 
 ```yaml
 variables:
   - name: "resource_type"
-    description: "Resource type"
-    validation:
-      enum: ["pod", "svc", "deployment"]
-  
+    choices: ["pod", "svc", "deployment"]
   - name: "resource_name"
-    description: "Resource name"
     required: true
-  
   - name: "resource"
-    description: "Full resource reference"
     computed: true
     transform:
       compose: "{{.resource_type}}/{{.resource_name}}"
 ```
-
-**Command:**
-```yaml
-command: "kubectl describe <resource>"
-```
-
-**Usage:**
-```bash
-resource_type: <pod>
-resource_name: my-pod
-# Result: kubectl describe pod/my-pod
-```
-
-#### Complex Composition with Conditionals
-
-```yaml
-variables:
-  - name: "host_port"
-    description: "Host port"
-    required: true
-  
-  - name: "target_port"
-    description: "Target port (empty to use host port)"
-    default: ""
-  
-  - name: "port_mapping"
-    description: "Complete port mapping"
-    computed: true
-    transform:
-      compose: |
-        {{- .host_port -}}:
-        {{- if .target_port -}}
-          {{- .target_port -}}
-        {{- else -}}
-          {{- .host_port -}}
-        {{- end -}}
-```
-
-**Usage:**
-```bash
-host_port: 8080
-target_port: [Enter]
-# Result: port_mapping = "8080:8080"
-
-host_port: 8080
-target_port: 9090
-# Result: port_mapping = "8080:9090"
-```
-
-The `compose` field receives all variable values as a map accessible via `{{.variable_name}}`.
 
 ## Variable Types (Reusable Definitions)
 
@@ -433,7 +416,6 @@ variables:
   - name: "kube_namespace"
     description: "Kubernetes namespace"
     type: "namespace"
-    transformTemplate: "k8s-namespace"  # Combine type with transform
 ```
 
 **Benefits:**
@@ -452,7 +434,7 @@ snippets:
   git-checkout-remote:
     name: "git-checkout-remote"
     description: "Checkout remote branch"
-    command: "git checkout <branch_ref>"
+    command: "git checkout ${branch_ref}"
     variables:
       - name: "remote"
         description: "Remote name"
@@ -460,11 +442,9 @@ snippets:
       - name: "branch"
         description: "Branch name"
         required: true
-      - name: "branch_ref"
-        description: "Full branch reference"
-        computed: true
-        transform:
-          compose: "{{.remote}}/{{.branch}}"
+    computed:
+      branch_ref:
+        value: 'remote + "/" + branch'
     tags: ["git", "branch"]
 ```
 
@@ -477,43 +457,32 @@ snippets:
   docker-run-advanced:
     name: "docker-run-advanced"
     description: "Run Docker container with optional flags"
-    command: "docker run <detach> <port> <volume> <name> <image>"
+    command: "docker run ${detach_arg} ${port_arg} ${volume_arg} ${name_arg} ${image_arg}"
     variables:
       - name: "detach"
         description: "Run in detached mode"
         type: "boolean"
         default: "false"
-        transform:
-          true_value: "-d"
-          false_value: ""
-      
       - name: "port"
         description: "Port mapping (empty for none)"
-        transform:
-          empty_value: ""
-          value_pattern: "-p {{.Value}}:{{.Value}}"
-      
       - name: "volume"
         description: "Volume mount (empty for none)"
-        transform:
-          empty_value: ""
-          value_pattern: "-v {{.Value}}"
-      
       - name: "container_name"
         description: "Container name (empty for auto)"
-        
-      - name: "name"
-        description: "Name flag"
-        computed: true
-        transform:
-          compose: |
-            {{- if .container_name -}}
-              --name {{.container_name}}
-            {{- end -}}
-      
       - name: "image"
         description: "Docker image"
         required: true
+    computed:
+      detach_arg:
+        value: 'boolFlag("-d", detach)'
+      port_arg:
+        value: 'empty(port) ? "" : "-p " + quote(port + ":" + port)'
+      volume_arg:
+        value: 'flag("-v", volume)'
+      name_arg:
+        value: 'flag("--name", container_name)'
+      image_arg:
+        value: "image"
     tags: ["docker", "container"]
 ```
 
@@ -527,7 +496,7 @@ image: nginx:latest
 # Result: docker run -d -p 8080:8080 --name my-app nginx:latest
 ```
 
-### Example 3: File Backup with Boolean Transform
+### Example 3: File Backup with Boolean Option
 
 Create a snippet that optionally adds a backup extension:
 
@@ -536,27 +505,28 @@ snippets:
   sed-edit-file:
     name: "sed-edit-file"
     description: "Edit file with sed"
-    command: "sed -i<backup> 's/<search>/<replace>/g' <file>"
+    command: "sed -i${backup_suffix} ${script_arg} ${file_arg}"
     variables:
       - name: "backup"
         description: "Create file backup"
         type: "boolean"
         default: "false"
-        transform:
-          true_value: ".bak"
-          false_value: ""
-      
       - name: "search"
         description: "Text to search for"
         required: true
-      
       - name: "replace"
         description: "Replacement text"
         required: true
-      
       - name: "file"
         description: "File to edit"
         required: true
+    computed:
+      backup_suffix:
+        value: 'backup == "true" ? ".bak" : ""'
+      script_arg:
+        value: 'quote("s/" + search + "/" + replace + "/g")'
+      file_arg:
+        value: "file"
     tags: ["sed", "edit", "file"]
 ```
 
@@ -578,51 +548,44 @@ snippets:
   kubectl-port-forward:
     name: "kubectl-port-forward"
     description: "Forward local port to pod or service"
-    command: "kubectl port-forward <resource> <port_mapping> <namespace>"
+    command: "kubectl port-forward ${resource_arg} ${port_mapping_arg} ${namespace_arg}"
     variables:
       - name: "resource_type"
         description: "Resource type"
         required: true
         default: "svc"
-        validation:
-          enum: ["pod", "svc"]
-      
+        choices: ["pod", "svc"]
       - name: "resource_name"
         description: "Resource name"
         required: true
-      
-      - name: "resource"
-        description: "Resource reference"
-        computed: true
-        transform:
-          compose: "{{.resource_type}}/{{.resource_name}}"
-      
       - name: "host_port"
         description: "Host port"
         required: true
         type: "port"
-      
       - name: "target_port"
         description: "Target port (empty to use host port)"
         default: ""
         type: "port"
-      
-      - name: "port_mapping"
-        description: "Port mapping"
-        computed: true
-        transform:
-          compose: |
-            {{- .host_port -}}:
-            {{- if .target_port -}}
-              {{- .target_port -}}
-            {{- else -}}
-              {{- .host_port -}}
-            {{- end -}}
-      
+      - name: "namespace_mode"
+        description: "Namespace mode"
+        choices: ["none", "all", "named"]
+        default: "none"
       - name: "namespace"
-        description: "Kubernetes namespace"
-        type: "namespace"
-        transformTemplate: "k8s-namespace"
+        description: "Namespace name"
+        visible_if: 'namespace_mode == "named"'
+        required_if: 'namespace_mode == "named"'
+    computed:
+      resource_arg:
+        value: 'resource_type + "/" + resource_name'
+      port_mapping_arg:
+        value: 'host_port + ":" + default(target_port, host_port)'
+      namespace_arg:
+        cases:
+          - when: 'namespace_mode == "all"'
+            value: "-A"
+          - when: 'namespace_mode == "named"'
+            value: '${flag("-n", namespace)}'
+          - default: true
     tags: ["kubernetes", "port-forward", "networking"]
 ```
 
@@ -670,29 +633,23 @@ variables:
     default: "info"
 ```
 
-### 4. Use Transform Templates for Reusability
+### 4. Use Helpers for Optional Flags
 
-Don't repeat transformation logic:
+Prefer expression helpers over hand-built flag strings:
 
 ```yaml
-# Good: Define once
-transform_templates:
-  follow-flag:
-    transform:
-      true_value: "-f"
-      false_value: ""
-
-# Use everywhere
+# Good: concise optional flag logic
 variables:
-  - name: "follow"
-    transformTemplate: "follow-flag"
+  - name: "output"
+    choices: ["", "wide", "yaml", "json"]
+computed:
+  output_arg:
+    value: 'flag("-o", output)'
 
-# Bad: Repeat everywhere
+# Bad: ask users to type complete flags
 variables:
-  - name: "follow"
-    transform:
-      true_value: "-f"
-      false_value: ""
+  - name: "output_arg"
+    description: "Output flag, such as -o yaml"
 ```
 
 ### 5. Use Variable Types for Common Patterns
@@ -709,7 +666,7 @@ variable_types:
       pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
 ```
 
-### 6. Leverage Computed Variables
+### 6. Leverage Top-Level Computed Values
 
 Reduce user input by computing values:
 
@@ -717,10 +674,13 @@ Reduce user input by computing values:
 # User only enters: resource_type, resource_name
 # System computes: resource = "pod/my-pod"
 variables:
-  - name: "resource"
-    computed: true
-    transform:
-      compose: "{{.resource_type}}/{{.resource_name}}"
+  - name: "resource_type"
+    choices: ["pod", "svc"]
+  - name: "resource_name"
+    required: true
+computed:
+  resource_arg:
+    value: 'resource_type + "/" + resource_name'
 ```
 
 ### 7. Use Enums for Fixed Choices
@@ -900,4 +860,3 @@ If you have questions or need help:
 4. Review the example files in this guide
 
 Happy snippet creation! 🚀
-
