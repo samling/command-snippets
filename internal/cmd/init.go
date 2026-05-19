@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,7 +31,18 @@ func newInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Create default config and snippet files",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := runInit(opts)
+			result, err := runInit(opts)
+			if err != nil {
+				return err
+			}
+			configPath := cfgFile
+			if configPath == "" {
+				configPath, err = defaultConfigPath()
+				if err != nil {
+					return err
+				}
+			}
+			printInitResult(cmd.OutOrStdout(), configPath, result)
 			return err
 		},
 	}
@@ -83,6 +95,36 @@ func writeInitialConfig(configPath string, snippetFiles map[string][]byte, opts 
 	}
 
 	return result, nil
+}
+
+func printInitResult(w io.Writer, configPath string, result initResult) {
+	if len(result.Created) == 0 && len(result.Overwritten) == 0 {
+		fmt.Fprintf(w, "CS config already exists at %s\n", configPath)
+		fmt.Fprintf(w, "Default snippets already exist in %s\n\n", filepath.Join(filepath.Dir(configPath), "snippets"))
+		fmt.Fprintln(w, "Nothing changed.")
+		fmt.Fprintln(w, "Use `cs init --missing` to restore missing default snippets.")
+		fmt.Fprintln(w, "Use `cs init --force` to overwrite existing default config and snippets.")
+		return
+	}
+
+	fmt.Fprintf(w, "Initialized CS config at %s\n", configPath)
+	printInitPaths(w, "Created", result.Created)
+	printInitPaths(w, "Overwritten", result.Overwritten)
+	printInitPaths(w, "Skipped existing", result.Skipped)
+	if len(result.Skipped) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Use `cs init --force` to overwrite existing files.")
+	}
+}
+
+func printInitPaths(w io.Writer, title string, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "%s:\n", title)
+	for _, path := range paths {
+		fmt.Fprintf(w, "  %s\n", path)
+	}
 }
 
 func writeTrackedFile(path string, data []byte, opts initOptions, result *initResult) error {

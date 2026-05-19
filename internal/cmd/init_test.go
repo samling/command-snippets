@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,61 @@ func TestRunInitRejectsForceAndMissingTogether(t *testing.T) {
 	if _, err := runInit(initOptions{Force: true, Missing: true}); err == nil {
 		t.Fatal("expected force plus missing to return error")
 	}
+}
+
+func TestPrintInitResultReportsCreatedFiles(t *testing.T) {
+	var out bytes.Buffer
+	configPath := filepath.Join("tmp", "cs", "config.yaml")
+	result := initResult{
+		Created: []string{
+			configPath,
+			filepath.Join("tmp", "cs", "snippets", "docker.yaml"),
+		},
+	}
+
+	printInitResult(&out, configPath, result)
+	got := out.String()
+
+	assertContains(t, got, "Initialized CS config at "+configPath)
+	assertContains(t, got, "Created:")
+	assertContains(t, got, filepath.Join("tmp", "cs", "snippets", "docker.yaml"))
+}
+
+func TestPrintInitResultReportsNoChangesAndSuggestions(t *testing.T) {
+	var out bytes.Buffer
+	configPath := filepath.Join("tmp", "cs", "config.yaml")
+	result := initResult{
+		Skipped: []string{
+			configPath,
+			filepath.Join("tmp", "cs", "snippets", "docker.yaml"),
+		},
+	}
+
+	printInitResult(&out, configPath, result)
+	got := out.String()
+
+	assertContains(t, got, "CS config already exists at "+configPath)
+	assertContains(t, got, "Nothing changed.")
+	assertContains(t, got, "cs init --missing")
+	assertContains(t, got, "cs init --force")
+}
+
+func TestPrintInitResultReportsMixedCreatedAndSkippedFiles(t *testing.T) {
+	var out bytes.Buffer
+	configPath := filepath.Join("tmp", "cs", "config.yaml")
+	result := initResult{
+		Created: []string{filepath.Join("tmp", "cs", "snippets", "git.yaml")},
+		Skipped: []string{configPath},
+	}
+
+	printInitResult(&out, configPath, result)
+	got := out.String()
+
+	assertContains(t, got, "Created:")
+	assertContains(t, got, filepath.Join("tmp", "cs", "snippets", "git.yaml"))
+	assertContains(t, got, "Skipped existing:")
+	assertContains(t, got, configPath)
+	assertContains(t, got, "cs init --force")
 }
 
 func TestWriteInitialConfigCreatesConfigAndSnippets(t *testing.T) {
@@ -207,5 +263,12 @@ func assertPaths(t *testing.T, got []string, want ...string) {
 		if count != 0 {
 			t.Fatalf("paths = %v, unexpected %q", got, path)
 		}
+	}
+}
+
+func assertContains(t *testing.T, got string, want string) {
+	t.Helper()
+	if !strings.Contains(got, want) {
+		t.Fatalf("output did not contain %q:\n%s", want, got)
 	}
 }

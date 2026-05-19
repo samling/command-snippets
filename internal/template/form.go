@@ -689,6 +689,11 @@ func (m formModel) renderCommandPreview() string {
 	}
 
 	var b strings.Builder
+	if m.snippet.Name != "" {
+		b.WriteString("Template: ")
+		b.WriteString(m.snippet.Name)
+		b.WriteString("\n")
+	}
 	b.WriteString(commandPreviewTitleStyle.Render("Command Preview:"))
 	b.WriteString("\n")
 	b.WriteString(result)
