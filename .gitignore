@@ -75,3 +75,7 @@ refs
 .data/
 result
 result-*
+
+# MCP
+.worktrees
+docs/superpowers/
