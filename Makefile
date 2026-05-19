@@ -32,13 +32,30 @@ install: build
 	@echo "Installing $(BINARY_NAME) to $(INSTALL_DIR)..."
 	sudo install -m 755 $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
 	@echo "Installed $(BINARY_NAME) to $(INSTALL_DIR)/$(BINARY_NAME)"
+	@echo "Installed version: $$($(INSTALL_DIR)/$(BINARY_NAME) --version)"
+	@resolved="$$(command -v $(BINARY_NAME) 2>/dev/null || true)"; \
+	if [ -n "$$resolved" ] && [ "$$resolved" != "$(INSTALL_DIR)/$(BINARY_NAME)" ]; then \
+		echo "Warning: PATH currently resolves $(BINARY_NAME) to $$resolved, not $(INSTALL_DIR)/$(BINARY_NAME)"; \
+	fi; \
+	other_paths="$$(which -a $(BINARY_NAME) 2>/dev/null | while IFS= read -r path; do [ "$$path" != "$(INSTALL_DIR)/$(BINARY_NAME)" ] && echo "$$path"; done)"; \
+	if [ -n "$$other_paths" ]; then \
+		echo "Warning: other $(BINARY_NAME) binaries exist on PATH:"; \
+		echo "$$other_paths" | while IFS= read -r path; do echo "  $$path"; done; \
+		echo "If your current shell still runs an older version, refresh its command cache:"; \
+		echo "  zsh: rehash"; \
+		echo "  bash: hash -r"; \
+	fi
 	@echo ""
 	@echo "Setting up configuration directory..."
 	@mkdir -p $(CONFIG_DIR)/snippets
 	@if [ ! -f "$(CONFIG_DIR)/config.yaml" ]; then \
 		echo "  Creating config.yaml from default template..."; \
-		go run . --generate-config > $(CONFIG_DIR)/config.yaml; \
-		echo "Configuration created at $(CONFIG_DIR)/config.yaml"; \
+		if $(BUILD_DIR)/$(BINARY_NAME) --generate-config > $(CONFIG_DIR)/config.yaml; then \
+			echo "Configuration created at $(CONFIG_DIR)/config.yaml"; \
+		else \
+			rm -f $(CONFIG_DIR)/config.yaml; \
+			exit 1; \
+		fi; \
 	else \
 		echo "Configuration already exists at $(CONFIG_DIR)/config.yaml - skipping"; \
 	fi
