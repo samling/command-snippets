@@ -39,8 +39,7 @@ Features:
 - Complex variable composition`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if generateConfig {
-			defaultConfig := createDefaultConfig()
-			data, err := yaml.Marshal(defaultConfig)
+			data, err := defaultConfigYAML()
 			if err != nil {
 				return fmt.Errorf("failed to marshal config: %w", err)
 			}
@@ -293,6 +292,10 @@ func saveConfig(cfg *models.Config, filename string) error {
 	}
 
 	return os.WriteFile(filename, data, 0644)
+}
+
+func defaultConfigYAML() ([]byte, error) {
+	return yaml.Marshal(createDefaultConfig())
 }
 
 // createDefaultConfig creates a minimal stub configuration
