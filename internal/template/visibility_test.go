@@ -311,6 +311,26 @@ func TestRenderCommandPreviewStylesComputedInterpolation(t *testing.T) {
 	}
 }
 
+func TestRenderCommandPreviewIncludesTemplateName(t *testing.T) {
+	snippet := &models.Snippet{
+		Name:    "docker-run-advanced",
+		Command: "docker run ${image_arg}",
+		Variables: []models.Variable{
+			{Name: "image", DefaultValue: "nginx"},
+		},
+		Computed: map[string]models.ComputedValue{
+			"image_arg": {Value: "image"},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	preview := model.renderCommandPreview()
+
+	if !strings.Contains(preview, "Template: docker-run-advanced") {
+		t.Fatalf("preview did not include template name:\n%s", preview)
+	}
+}
+
 func TestRenderCommandPreviewNormalizesEmptyComputedSpacing(t *testing.T) {
 	snippet := &models.Snippet{
 		Command: "cmd ${empty_arg} ${filled_arg}",

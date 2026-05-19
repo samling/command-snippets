@@ -81,6 +81,26 @@ func TestNewProcessor(t *testing.T) {
 	}
 }
 
+func TestPromptForVariablesWithPresetsSkipsFormWhenAllVariablesArePreset(t *testing.T) {
+	config := loadTestConfig(t)
+	snippet := config.Snippets["simple-with-vars"]
+
+	values, err := promptForVariablesWithBubbleTea(&snippet, map[string]string{
+		"message": "Hello",
+		"name":    "Preset",
+	}, config, true)
+	if err != nil {
+		t.Fatalf("promptForVariablesWithBubbleTea failed: %v", err)
+	}
+
+	if values["message"] != "Hello" {
+		t.Errorf("Expected preset message %q, got %q", "Hello", values["message"])
+	}
+	if values["name"] != "Preset" {
+		t.Errorf("Expected preset name %q, got %q", "Preset", values["name"])
+	}
+}
+
 // TestProcessSnippet_NoVariables tests processing snippets without variables
 func TestProcessSnippet_NoVariables(t *testing.T) {
 	config := loadTestConfig(t)

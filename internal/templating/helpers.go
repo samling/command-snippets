@@ -20,6 +20,15 @@ func boolFlag(name string, enabled any) string {
 	return ""
 }
 
+func repeatFlag(name string, values any) string {
+	items := strings.Fields(toString(values))
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, strings.TrimSpace(name+" "+quoteIfUnsafe(item)))
+	}
+	return strings.Join(parts, " ")
+}
+
 func quote(value any) string {
 	return "'" + strings.ReplaceAll(toString(value), "'", "'\\''") + "'"
 }

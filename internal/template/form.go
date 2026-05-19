@@ -689,6 +689,11 @@ func (m formModel) renderCommandPreview() string {
 	}
 
 	var b strings.Builder
+	if m.snippet.Name != "" {
+		b.WriteString("Template: ")
+		b.WriteString(m.snippet.Name)
+		b.WriteString("\n")
+	}
 	b.WriteString(commandPreviewTitleStyle.Render("Command Preview:"))
 	b.WriteString("\n")
 	b.WriteString(result)
@@ -1021,16 +1026,27 @@ func (m formModel) getValues() map[string]string {
 func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[string]string, config *models.Config, noColor bool) (map[string]string, error) {
 	// Check if there are any non-computed variables that need user input
 	hasUserVariables := false
+	allVariablesPreset := true
+	values := make(map[string]string)
 	for _, variable := range snippet.Variables {
 		if !variable.Computed {
 			hasUserVariables = true
-			break
+			value := variable.DefaultValue
+			if presetValue, exists := presetValues[variable.Name]; exists {
+				value = presetValue
+			} else {
+				allVariablesPreset = false
+			}
+			values[variable.Name] = newFormField(variable, value).value
 		}
 	}
 
 	// If no user variables, return empty map immediately (no form needed)
 	if !hasUserVariables {
 		return make(map[string]string), nil
+	}
+	if allVariablesPreset {
+		return values, nil
 	}
 
 	SetupColorProfile(noColor)

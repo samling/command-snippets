@@ -241,12 +241,13 @@ func scanInterpolationExpression(input string, start int) (string, int, bool) {
 }
 
 func eval(expression string, values map[string]string) (any, error) {
-	env := make(map[string]any, len(values)+6)
+	env := make(map[string]any, len(values)+7)
 	for k, v := range values {
 		env[k] = v
 	}
 	env["flag"] = flag
 	env["boolFlag"] = boolFlag
+	env["repeatFlag"] = repeatFlag
 	env["quote"] = quote
 	env["join"] = joinNonEmpty
 	env["default"] = defaultValue
