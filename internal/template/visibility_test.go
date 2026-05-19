@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/samling/command-snippets/internal/models"
 )
 
@@ -232,5 +234,37 @@ func TestNewFormModelInitialVisibilityUsesNormalizedBooleanDefault(t *testing.T)
 	}
 	if model.fields[1].variable.Name != "name" {
 		t.Fatalf("got dependent field %q, want name", model.fields[1].variable.Name)
+	}
+}
+
+func TestRenderCommandPreviewStylesComputedInterpolation(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+
+	snippet := &models.Snippet{
+		Command: "kubectl get pods ${namespace_arg}",
+		Variables: []models.Variable{
+			{Name: "namespace_mode", DefaultValue: "named", Choices: []string{"none", "all", "named"}},
+			{Name: "namespace", DefaultValue: "default", VisibleIf: `namespace_mode == "named"`},
+		},
+		Computed: map[string]models.ComputedValue{
+			"namespace_arg": {
+				Cases: []models.ComputedCase{
+					{When: `namespace_mode == "all"`, Value: "-A"},
+					{When: `namespace_mode == "named"`, Value: `${flag("-n", namespace)}`},
+					{Default: true},
+				},
+			},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	preview := model.renderCommandPreview()
+	styledValue := filledVarStyle.Render("-n default")
+	if !strings.Contains(preview, styledValue) {
+		t.Fatalf("preview %q does not contain styled computed value %q", preview, styledValue)
+	}
+	if strings.Contains(preview, "${namespace_arg}") {
+		t.Fatalf("preview still contains raw computed placeholder: %q", preview)
 	}
 }

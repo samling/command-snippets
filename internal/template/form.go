@@ -9,6 +9,7 @@ import (
 
 	"github.com/samling/command-snippets/internal/models"
 	"github.com/samling/command-snippets/internal/regex"
+	"github.com/samling/command-snippets/internal/templating"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -22,6 +23,11 @@ var ErrUserCancelled = errors.New("user cancelled")
 // placeholderPattern matches <name> tokens used by the snippet command
 // template — must stay in sync with models.placeholderPattern.
 var placeholderPattern = regexp.MustCompile(`<([A-Za-z_][A-Za-z0-9_]*)>`)
+
+// computedPlaceholderPattern matches new-style command interpolation for
+// named values. The full renderer supports expressions; preview styling only
+// colors named placeholders so shell-like expressions are left to fallback.
+var computedPlaceholderPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // wrapLines takes a slice of lines and wraps any that exceed the given width
 func wrapLines(lines []string, maxWidth int) []string {
@@ -597,20 +603,22 @@ func (m formModel) renderCommandPreview() string {
 	if m.snippet == nil {
 		return ""
 	}
-	if result, err := m.snippet.ProcessTemplate(m.getValues(), m.config); err == nil {
-		var b strings.Builder
-		b.WriteString(commandPreviewTitleStyle.Render("Command Preview:"))
-		b.WriteString("\n")
-		b.WriteString(result)
 
-		return commandPreviewStyle.Render(b.String())
+	valueMap := m.getValues()
+	filledMap := make(map[string]bool, len(valueMap))
+	for _, field := range m.fields {
+		filledMap[field.variable.Name] = field.value != ""
 	}
 
-	valueMap := make(map[string]string, len(m.fields))
-	filledMap := make(map[string]bool, len(m.fields))
-	for _, field := range m.fields {
-		valueMap[field.variable.Name] = field.value
-		filledMap[field.variable.Name] = field.value != ""
+	computedValues := map[string]string{}
+	computedErr := false
+	if len(m.snippet.Computed) > 0 {
+		resolved, err := templating.ResolveComputed(m.snippet.Computed, valueMap)
+		if err != nil {
+			computedErr = true
+		} else {
+			computedValues = resolved
+		}
 	}
 
 	varByName := make(map[string]*models.Variable, len(m.snippet.Variables))
@@ -619,7 +627,24 @@ func (m formModel) renderCommandPreview() string {
 		varByName[v.Name] = v
 	}
 
-	result := placeholderPattern.ReplaceAllStringFunc(m.snippet.Command, func(match string) string {
+	result := computedPlaceholderPattern.ReplaceAllStringFunc(m.snippet.Command, func(match string) string {
+		name := match[2 : len(match)-1]
+		if computedErr {
+			return unfilledVarStyle.Render(match)
+		}
+		if val, ok := computedValues[name]; ok {
+			if val != "" {
+				return filledVarStyle.Render(val)
+			}
+			return ""
+		}
+		if val, ok := valueMap[name]; ok && val != "" {
+			return filledVarStyle.Render(val)
+		}
+		return unfilledVarStyle.Render(match)
+	})
+
+	result = placeholderPattern.ReplaceAllStringFunc(result, func(match string) string {
 		name := match[1 : len(match)-1]
 		variable, ok := varByName[name]
 		if !ok {
