@@ -62,6 +62,32 @@ snippets:
     created_at: "2025-01-01T00:00:00Z"
     updated_at: "2025-01-01T00:00:00Z"
 
+  kubectl-get-pods-conditional-namespace:
+    id: "kubectl-get-pods-conditional-namespace"
+    name: "kubectl-get-pods-conditional-namespace"
+    description: "Get pods with a namespace prompt that appears only when needed"
+    command: "kubectl get pods ${namespace_arg}"
+    variables:
+      - name: "namespace_mode"
+        description: "Namespace mode"
+        choices: ["none", "all", "named"]
+        default: "none"
+      - name: "namespace"
+        description: "Namespace name"
+        visible_if: namespace_mode == "named"
+        required_if: namespace_mode == "named"
+    computed:
+      namespace_arg:
+        cases:
+          - when: namespace_mode == "all"
+            value: "-A"
+          - when: namespace_mode == "named"
+            value: '${flag("-n", namespace)}'
+          - default: true
+    tags: ["kubernetes", "pods", "example", "conditional"]
+    created_at: "2025-01-01T00:00:00Z"
+    updated_at: "2025-01-01T00:00:00Z"
+
   kubectl-logs:
     id: "kubectl-logs"
     name: "kubectl-logs"
