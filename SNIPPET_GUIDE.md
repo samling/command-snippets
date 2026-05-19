@@ -732,6 +732,8 @@ cs exec your-snippet
 
 ## Configuration Organization
 
+Run `cs init` to create the initial config file and copy the shipped snippet files into your config directory. The copied files are normal user configuration: edit them, delete commands you do not want, or split them further. CS does not silently restore deleted snippets on later runs.
+
 ### Single File
 
 For small collections, keep everything in one file:

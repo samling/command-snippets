@@ -27,6 +27,18 @@ make install
 go install github.com/samling/command-snippets/cmd/cs@latest
 ```
 
+### First-Time Setup
+
+Run `cs init` once to create your user config and copy the default snippet files:
+
+```bash
+cs init
+```
+
+This creates `$XDG_CONFIG_HOME/cs/config.yaml` when `XDG_CONFIG_HOME` is set, otherwise `~/.config/cs/config.yaml`, plus editable snippets in `snippets/*.yaml` next to that config file.
+
+The copied snippets are user-owned. You can edit or delete them; CS will not recreate deleted snippets unless you run `cs init --missing` or overwrite them with `cs init --force`.
+
 **Note:** The `snippets/` directory in this repository contains example snippet files that you can use as reference for creating your own templates.
 
 **Want to create your own snippets?** See the **[Snippet Creation Guide](SNIPPET_GUIDE.md)** for comprehensive documentation on creating command templates with variables, transformations, and validation.
