@@ -28,6 +28,29 @@ func TestMissingConfigErrorMentionsInit(t *testing.T) {
 	}
 }
 
+func TestRunInitUsesConfiguredPath(t *testing.T) {
+	dir := t.TempDir()
+	oldCfgFile := cfgFile
+	t.Cleanup(func() { cfgFile = oldCfgFile })
+	cfgFile = filepath.Join(dir, "config.yaml")
+
+	if _, err := runInit(initOptions{}); err != nil {
+		t.Fatalf("runInit returned error: %v", err)
+	}
+	if _, err := os.Stat(cfgFile); err != nil {
+		t.Fatalf("config was not created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "snippets", "docker.yaml")); err != nil {
+		t.Fatalf("docker snippet was not created: %v", err)
+	}
+}
+
+func TestRunInitRejectsForceAndMissingTogether(t *testing.T) {
+	if _, err := runInit(initOptions{Force: true, Missing: true}); err == nil {
+		t.Fatal("expected force plus missing to return error")
+	}
+}
+
 func TestWriteInitialConfigCreatesConfigAndSnippets(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")

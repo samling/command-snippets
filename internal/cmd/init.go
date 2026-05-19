@@ -42,6 +42,10 @@ func newInitCmd() *cobra.Command {
 }
 
 func runInit(opts initOptions) (initResult, error) {
+	if opts.Force && opts.Missing {
+		return initResult{}, errors.New("force and missing cannot be used together")
+	}
+
 	configPath := cfgFile
 	if configPath == "" {
 		path, err := defaultConfigPath()
