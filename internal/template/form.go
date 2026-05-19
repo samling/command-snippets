@@ -178,6 +178,16 @@ func newFormField(variable models.Variable, value string) formField {
 	return field
 }
 
+func displayEnumOption(option, emptyLabel string) string {
+	if option == "" {
+		if emptyLabel != "" {
+			return emptyLabel
+		}
+		return "none"
+	}
+	return option
+}
+
 // newFormModel creates a new form model for the given snippet
 func newFormModel(snippet *models.Snippet, presetValues map[string]string, config *models.Config) formModel {
 	model := formModel{
@@ -674,6 +684,10 @@ func (m formModel) renderCommandPreview() string {
 		}
 	})
 
+	if len(m.snippet.Computed) > 0 {
+		result = templating.NormalizeCommandWhitespace(result)
+	}
+
 	var b strings.Builder
 	b.WriteString(commandPreviewTitleStyle.Render("Command Preview:"))
 	b.WriteString("\n")
@@ -785,12 +799,13 @@ func (m formModel) View() string {
 			// For enum fields, show all options horizontally with selection brackets
 			var options []string
 			for idx, opt := range field.enumOptions {
+				displayOpt := displayEnumOption(opt, field.variable.EmptyLabel)
 				if idx == field.enumIndex {
 					// Current selection shown with angle brackets and color
-					options = append(options, selectedEnumStyle.Render("<"+opt+">"))
+					options = append(options, selectedEnumStyle.Render("<"+displayOpt+">"))
 				} else {
 					// Unselected options with padding
-					options = append(options, unselectedEnumStyle.Render(" "+opt+" "))
+					options = append(options, unselectedEnumStyle.Render(" "+displayOpt+" "))
 				}
 			}
 			displayValue = strings.Join(options, " ")

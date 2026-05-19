@@ -64,6 +64,7 @@ type Variable struct {
 	Required          bool        `yaml:"required,omitempty"`
 	Type              string      `yaml:"type,omitempty"`
 	Choices           []string    `yaml:"choices,omitempty"`
+	EmptyLabel        string      `yaml:"empty_label,omitempty"`
 	VisibleIf         string      `yaml:"visible_if,omitempty"`
 	RequiredIf        string      `yaml:"required_if,omitempty"`
 	Transform         *Transform  `yaml:"transform,omitempty"`

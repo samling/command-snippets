@@ -81,6 +81,48 @@ func TestFormChoicesAppearAsEnumOptions(t *testing.T) {
 	}
 }
 
+func TestFormChoicesRenderEmptyOptionAsNone(t *testing.T) {
+	snippet := &models.Snippet{
+		Variables: []models.Variable{
+			{Name: "output", Choices: []string{"", "wide", "yaml", "json"}},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	view := model.View()
+
+	if !strings.Contains(view, "<none>") {
+		t.Fatalf("view did not render empty choice as none:\n%s", view)
+	}
+	if strings.Contains(view, "<>") {
+		t.Fatalf("view rendered empty choice as angle-only placeholder:\n%s", view)
+	}
+	if got := model.fields[0].value; got != "" {
+		t.Fatalf("empty choice changed underlying value to %q", got)
+	}
+}
+
+func TestFormChoicesUseEmptyLabelForEmptyOption(t *testing.T) {
+	snippet := &models.Snippet{
+		Variables: []models.Variable{
+			{Name: "output", Choices: []string{"", "wide", "yaml", "json"}, EmptyLabel: "normal"},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	view := model.View()
+
+	if !strings.Contains(view, "<normal>") {
+		t.Fatalf("view did not render empty choice with custom label:\n%s", view)
+	}
+	if strings.Contains(view, "<none>") || strings.Contains(view, "<>") {
+		t.Fatalf("view rendered fallback empty label instead of custom label:\n%s", view)
+	}
+	if got := model.fields[0].value; got != "" {
+		t.Fatalf("empty choice changed underlying value to %q", got)
+	}
+}
+
 func TestFormEnterValidationIgnoresHiddenRequiredVariable(t *testing.T) {
 	snippet := &models.Snippet{
 		Variables: []models.Variable{
@@ -266,5 +308,28 @@ func TestRenderCommandPreviewStylesComputedInterpolation(t *testing.T) {
 	}
 	if strings.Contains(preview, "${namespace_arg}") {
 		t.Fatalf("preview still contains raw computed placeholder: %q", preview)
+	}
+}
+
+func TestRenderCommandPreviewNormalizesEmptyComputedSpacing(t *testing.T) {
+	snippet := &models.Snippet{
+		Command: "cmd ${empty_arg} ${filled_arg}",
+		Variables: []models.Variable{
+			{Name: "selector", DefaultValue: "test"},
+		},
+		Computed: map[string]models.ComputedValue{
+			"empty_arg":  {Value: `""`},
+			"filled_arg": {Value: `flag("--selector", selector)`},
+		},
+	}
+
+	model := newFormModel(snippet, nil, nil)
+	preview := model.renderCommandPreview()
+
+	if !strings.Contains(preview, "cmd --selector test") {
+		t.Fatalf("preview did not normalize empty computed placeholders:\n%s", preview)
+	}
+	if strings.Contains(preview, "cmd  --selector") {
+		t.Fatalf("preview contains extra spaces from empty computed placeholders:\n%s", preview)
 	}
 }
