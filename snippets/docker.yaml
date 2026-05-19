@@ -119,7 +119,7 @@ snippets:
         description: "Environment variable (KEY=VALUE)"
         default: ""
         validation:
-          pattern: "^[A-Z_][A-Z0-9_]*=.*$"
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+( [A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+)*$"
       - name: "detach"
         description: "Run in detached mode"
         type: "boolean"

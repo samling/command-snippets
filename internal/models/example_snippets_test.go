@@ -163,6 +163,26 @@ func TestShippedCurrentStyleSnippetRendering(t *testing.T) {
 	}
 }
 
+func TestDockerRunAdvancedAllowsRepeatedEnvVars(t *testing.T) {
+	cfg := loadShippedSnippetConfig(t)
+	snippet, ok := cfg.Snippets["docker-run-advanced"]
+	if !ok {
+		t.Fatal("snippet docker-run-advanced not found")
+	}
+
+	for _, variable := range snippet.Variables {
+		if variable.Name != "env_var" {
+			continue
+		}
+		if err := variable.ValidateWithConfig("test=test foo=bar", cfg); err != nil {
+			t.Fatalf("env_var validation rejected repeated env vars: %v", err)
+		}
+		return
+	}
+
+	t.Fatal("env_var variable not found")
+}
+
 func loadShippedSnippetConfig(t *testing.T) *Config {
 	t.Helper()
 
