@@ -296,12 +296,13 @@ These helpers are available in `${...}`, computed `value`, computed case express
 |--------|---------|--------|
 | `flag(name, value)` | `flag("-o", output)` | `-o json` when `output` is `json`, otherwise empty |
 | `boolFlag(name, enabled)` | `boolFlag("--verbose", verbose)` | `--verbose` when truthy, otherwise empty |
+| `repeatFlag(name, values)` | `repeatFlag("-e", env_var)` | `-e A=1 -e B=2` when `env_var` is `A=1 B=2` |
 | `quote(value)` | `quote("hello world")` | `'hello world'` |
 | `join(values, sep)` | `join([namespace_arg, output_arg], " ")` | non-empty values joined with a separator |
 | `default(value, fallback)` | `default(output, "wide")` | fallback when value is empty |
 | `empty(value)` | `empty(output)` | true when value is empty or whitespace |
 
-`flag` shell-quotes unsafe values automatically. For example, `flag("--name", "hello world")` renders `--name 'hello world'`.
+`flag` and `repeatFlag` shell-quote unsafe values automatically. For example, `flag("--name", "hello world")` renders `--name 'hello world'`. `repeatFlag` splits values on whitespace, so values containing spaces are not supported.
 
 ### Advanced Compatibility
 

@@ -132,7 +132,7 @@ snippets:
       volume_arg:
         value: 'flag("-v", volume)'
       env_arg:
-        value: 'flag("-e", env_var)'
+        value: 'repeatFlag("-e", env_var)'
       image_name_arg:
         value: "image_name"
     tags: ["docker", "advanced"]

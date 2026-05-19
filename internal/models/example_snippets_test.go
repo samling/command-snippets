@@ -127,6 +127,12 @@ func TestShippedCurrentStyleSnippetRendering(t *testing.T) {
 			want:    "docker ps -a --filter name=myapp",
 		},
 		{
+			name:    "docker advanced repeats env flag",
+			snippet: "docker-run-advanced",
+			values:  map[string]string{"image_name": "nginx", "env_var": "TEST=TEST FOO=BAR"},
+			want:    "docker run -e TEST=TEST -e FOO=BAR nginx",
+		},
+		{
 			name:    "git computed message flag",
 			snippet: "git-commit-amend",
 			values:  map[string]string{"no_edit": "false", "new_message": "fix bug"},
