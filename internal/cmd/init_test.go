@@ -3,8 +3,30 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestDefaultConfigPathUsesXDGConfigHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-config")
+	path, err := defaultConfigPath()
+	if err != nil {
+		t.Fatalf("defaultConfigPath returned error: %v", err)
+	}
+	if path != filepath.Join("/tmp/xdg-config", "cs", "config.yaml") {
+		t.Fatalf("path = %q, want XDG config path", path)
+	}
+}
+
+func TestMissingConfigErrorMentionsInit(t *testing.T) {
+	err := missingConfigError(filepath.Join("/tmp", "missing", "config.yaml"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cs init") {
+		t.Fatalf("error %q should mention cs init", err)
+	}
+}
 
 func TestWriteInitialConfigCreatesConfigAndSnippets(t *testing.T) {
 	dir := t.TempDir()

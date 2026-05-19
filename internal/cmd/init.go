@@ -44,11 +44,11 @@ func newInitCmd() *cobra.Command {
 func runInit(opts initOptions) (initResult, error) {
 	configPath := cfgFile
 	if configPath == "" {
-		home, err := os.UserHomeDir()
+		path, err := defaultConfigPath()
 		if err != nil {
 			return initResult{}, err
 		}
-		configPath = filepath.Join(home, ".config", "cs", "config.yaml")
+		configPath = path
 	}
 
 	return writeInitialConfig(configPath, defaults.SnippetFiles(), opts)

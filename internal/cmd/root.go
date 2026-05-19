@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,12 @@ Features:
 - Reusable transformation patterns
 - Tag-based organization
 - Complex variable composition`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if !commandNeedsConfig(cmd) {
+			return nil
+		}
+		return initConfig()
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if generateConfig {
 			data, err := defaultConfigYAML()
@@ -58,13 +65,14 @@ func Execute() error {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
+	cobra.EnableTraverseRunHooks = true
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/cs/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $XDG_CONFIG_HOME/cs/config.yaml, fallback $HOME/.config/cs/config.yaml)")
 	rootCmd.Flags().BoolVar(&generateConfig, "generate-config", false, "generate default config to stdout")
 
 	// Add subcommands
+	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newAddCmd())
 	rootCmd.AddCommand(newListCmd())
 	rootCmd.AddCommand(newSearchCmd())
@@ -75,33 +83,45 @@ func init() {
 }
 
 // initConfig reads in config file and ENV variables.
-func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag
-	} else {
-		// Find home directory
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
-
-		// Search config in home directory with name "config"
-		cfgFile = filepath.Join(home, ".config", "cs", "config.yaml")
+func initConfig() error {
+	if cfgFile == "" {
+		path, err := defaultConfigPath()
+		if err != nil {
+			return err
+		}
+		cfgFile = path
 	}
 
 	// Load configuration
 	var err error
 	config, err = loadConfig(cfgFile)
 	if err != nil {
-		// Create default config if file doesn't exist
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			config = createDefaultConfig()
-			if err := saveConfig(config, cfgFile); err != nil {
-				fmt.Printf("Warning: Could not save default config: %v\n", err)
-			}
-		} else {
-			fmt.Printf("Error loading config: %v\n", err)
-			os.Exit(1)
+			return missingConfigError(cfgFile)
 		}
+		return fmt.Errorf("error loading config: %w", err)
 	}
+	return nil
+}
+
+func commandNeedsConfig(cmd *cobra.Command) bool {
+	return cmd.Parent() != nil && cmd.CommandPath() != "cs init"
+}
+
+func defaultConfigPath() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); strings.TrimSpace(xdg) != "" {
+		return filepath.Join(xdg, "cs", "config.yaml"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "cs", "config.yaml"), nil
+}
+
+func missingConfigError(path string) error {
+	return fmt.Errorf("config file not found at %s; run `cs init` to create one", path)
 }
 
 // loadConfig loads configuration from YAML file and merges additional snippet files
