@@ -208,6 +208,37 @@ func TestTransformTemplateStructure(t *testing.T) {
 	}
 }
 
+func TestComputedTemplateStructure(t *testing.T) {
+	data := []byte(`
+computed_templates:
+  namespace:
+    description: Kubernetes namespace flag
+    cases:
+      - when: namespace == "all"
+        value: -A
+      - when: '!empty(namespace)'
+        value: '${flag("-n", namespace)}'
+      - default: true
+        value: ""
+`)
+
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("Failed to parse computed templates: %v", err)
+	}
+
+	template, exists := config.ComputedTemplates["namespace"]
+	if !exists {
+		t.Fatal("Expected computed template namespace not found")
+	}
+	if template.Description == "" {
+		t.Fatal("Computed template should have description")
+	}
+	if len(template.Cases) != 3 {
+		t.Fatalf("Expected 3 cases, got %d", len(template.Cases))
+	}
+}
+
 // TestVariableTypeStructure tests variable type structure
 func TestVariableTypeStructure(t *testing.T) {
 	config := loadTestConfig(t)
@@ -363,7 +394,7 @@ func TestSnippetStructure(t *testing.T) {
 			if tt.hasComputedVars {
 				hasComputed := false
 				for _, v := range snippet.Variables {
-					if v.Computed {
+					if v.Computed.IsLegacy() || v.Computed.HasValue() || v.ComputedTemplate != "" {
 						hasComputed = true
 						break
 					}

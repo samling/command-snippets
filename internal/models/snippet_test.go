@@ -375,6 +375,85 @@ func TestProcessTemplate_ComputedConflictWithRawInputReturnsError(t *testing.T) 
 	}
 }
 
+func TestProcessTemplate_VariableComputedTemplate(t *testing.T) {
+	config := &Config{
+		ComputedTemplates: map[string]ComputedTemplate{
+			"namespace": {
+				Cases: []ComputedCase{
+					{When: `namespace == "all"`, Value: "-A"},
+					{When: `!empty(namespace)`, Value: `${flag("-n", namespace)}`},
+					{Default: true, Value: ""},
+				},
+			},
+		},
+	}
+	snippet := Snippet{
+		Command: "kubectl get pods ${namespace}",
+		Variables: []Variable{
+			{Name: "namespace", ComputedTemplate: "namespace"},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		namespace string
+		want      string
+	}{
+		{name: "empty namespace is omitted", namespace: "", want: "kubectl get pods"},
+		{name: "all namespace uses all flag", namespace: "all", want: "kubectl get pods -A"},
+		{name: "named namespace uses namespace flag", namespace: "default", want: "kubectl get pods -n default"},
+		{name: "unsafe namespace is quoted", namespace: "team space", want: "kubectl get pods -n 'team space'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := snippet.ProcessTemplate(map[string]string{"namespace": tt.namespace}, config)
+			if err != nil {
+				t.Fatalf("ProcessTemplate failed: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProcessTemplate_VariableInlineComputed(t *testing.T) {
+	snippet := Snippet{
+		Command: "kubectl get pods ${namespace}",
+		Variables: []Variable{
+			{
+				Name: "namespace",
+				Computed: VariableComputed{
+					Value: &ComputedValue{Value: `namespace == "all" ? "-A" : flag("-n", namespace)`},
+				},
+			},
+		},
+	}
+
+	got, err := snippet.ProcessTemplate(map[string]string{"namespace": "default"}, nil)
+	if err != nil {
+		t.Fatalf("ProcessTemplate failed: %v", err)
+	}
+	if got != "kubectl get pods -n default" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestProcessTemplate_MissingVariableComputedTemplateReturnsError(t *testing.T) {
+	snippet := Snippet{
+		Command: "kubectl get pods ${namespace}",
+		Variables: []Variable{
+			{Name: "namespace", ComputedTemplate: "missing"},
+		},
+	}
+
+	_, err := snippet.ProcessTemplate(map[string]string{"namespace": "default"}, nil)
+	if err == nil {
+		t.Fatal("expected missing computed template error")
+	}
+}
+
 func TestProcessTemplate_LegacySnippetWithoutNewRenderingPreservesWhitespace(t *testing.T) {
 	snippet := Snippet{
 		Command: "app <enabled> <missing>",

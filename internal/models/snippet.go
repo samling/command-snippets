@@ -9,6 +9,7 @@ import (
 	"text/template"
 
 	"github.com/samling/command-snippets/internal/templating"
+	"gopkg.in/yaml.v3"
 )
 
 // SnippetSource represents where a snippet was loaded from
@@ -58,19 +59,57 @@ type ComputedCase = templating.ComputedCase
 
 // Variable defines a template variable with advanced behavior
 type Variable struct {
-	Name              string      `yaml:"name"`
-	Description       string      `yaml:"description,omitempty"`
-	DefaultValue      string      `yaml:"default,omitempty"`
-	Required          bool        `yaml:"required,omitempty"`
-	Type              string      `yaml:"type,omitempty"`
-	Choices           []string    `yaml:"choices,omitempty"`
-	EmptyLabel        string      `yaml:"empty_label,omitempty"`
-	VisibleIf         string      `yaml:"visible_if,omitempty"`
-	RequiredIf        string      `yaml:"required_if,omitempty"`
-	Transform         *Transform  `yaml:"transform,omitempty"`
-	TransformTemplate string      `yaml:"transform_template,omitempty"`
-	Validation        *Validation `yaml:"validation,omitempty"`
-	Computed          bool        `yaml:"computed,omitempty"`
+	Name              string           `yaml:"name"`
+	Description       string           `yaml:"description,omitempty"`
+	DefaultValue      string           `yaml:"default,omitempty"`
+	Required          bool             `yaml:"required,omitempty"`
+	Type              string           `yaml:"type,omitempty"`
+	Choices           []string         `yaml:"choices,omitempty"`
+	EmptyLabel        string           `yaml:"empty_label,omitempty"`
+	VisibleIf         string           `yaml:"visible_if,omitempty"`
+	RequiredIf        string           `yaml:"required_if,omitempty"`
+	Transform         *Transform       `yaml:"transform,omitempty"`
+	TransformTemplate string           `yaml:"transform_template,omitempty"`
+	Validation        *Validation      `yaml:"validation,omitempty"`
+	Computed          VariableComputed `yaml:"computed,omitempty"`
+	ComputedTemplate  string           `yaml:"computed_template,omitempty"`
+}
+
+type VariableComputed struct {
+	Legacy bool
+	Value  *ComputedValue
+}
+
+func (c VariableComputed) IsZero() bool {
+	return !c.Legacy && c.Value == nil
+}
+
+func (c VariableComputed) IsLegacy() bool {
+	return c.Legacy
+}
+
+func (c VariableComputed) HasValue() bool {
+	return c.Value != nil
+}
+
+func (c *VariableComputed) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode && value.Tag == "!!bool" {
+		var legacy bool
+		if err := value.Decode(&legacy); err != nil {
+			return err
+		}
+		c.Legacy = legacy
+		c.Value = nil
+		return nil
+	}
+
+	var computed ComputedValue
+	if err := value.Decode(&computed); err != nil {
+		return err
+	}
+	c.Legacy = false
+	c.Value = &computed
+	return nil
 }
 
 // Transform defines conditional transformations
@@ -135,6 +174,16 @@ type TransformTemplate struct {
 	Transform   *Transform `yaml:"transform"`
 }
 
+type ComputedTemplate struct {
+	Description string         `yaml:"description"`
+	Value       string         `yaml:"value,omitempty"`
+	Cases       []ComputedCase `yaml:"cases,omitempty"`
+}
+
+func (t ComputedTemplate) ComputedValue() ComputedValue {
+	return ComputedValue{Value: t.Value, Cases: t.Cases}
+}
+
 // VariableType defines reusable variable configurations
 type VariableType struct {
 	Description string      `yaml:"description"`
@@ -146,6 +195,7 @@ type VariableType struct {
 // Config represents the main configuration file
 type Config struct {
 	TransformTemplates map[string]TransformTemplate `yaml:"transform_templates"`
+	ComputedTemplates  map[string]ComputedTemplate  `yaml:"computed_templates"`
 	VariableTypes      map[string]VariableType      `yaml:"variable_types"`
 	Snippets           map[string]Snippet           `yaml:"snippets"`
 	Settings           Settings                     `yaml:"settings"`
@@ -198,7 +248,7 @@ func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (str
 		return match
 	})
 
-	if len(s.Computed) == 0 {
+	if len(s.Computed) == 0 && !s.hasVariableComputedValues() {
 		return rendered, nil
 	}
 
@@ -223,12 +273,24 @@ func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (str
 	for name, value := range computed {
 		context[name] = value
 	}
+	for name, value := range processed {
+		context[name] = value
+	}
 
 	rendered, err = templating.Interpolate(rendered, context)
 	if err != nil {
 		return "", err
 	}
 	return templating.NormalizeCommandWhitespace(rendered), nil
+}
+
+func (s *Snippet) hasVariableComputedValues() bool {
+	for _, variable := range s.Variables {
+		if variable.Computed.HasValue() || variable.ComputedTemplate != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveTransform returns the Transform that applies to this variable, either
@@ -261,12 +323,35 @@ func (v *Variable) IsVisible(values map[string]string) (bool, error) {
 // ProcessVariable applies the variable's transform (if any) to value, using
 // allValues as the binding for compose templates.
 func (s *Snippet) ProcessVariable(variable Variable, value string, allValues map[string]string, config *Config) (string, error) {
+	if variable.ComputedTemplate != "" {
+		if config == nil {
+			return "", fmt.Errorf("computed template %q requires config", variable.ComputedTemplate)
+		}
+		template, ok := config.ComputedTemplates[variable.ComputedTemplate]
+		if !ok {
+			return "", fmt.Errorf("computed template '%s' not found", variable.ComputedTemplate)
+		}
+		computed, err := templating.ResolveComputed(map[string]ComputedValue{variable.Name: template.ComputedValue()}, allValues)
+		if err != nil {
+			return "", err
+		}
+		return computed[variable.Name], nil
+	}
+
+	if variable.Computed.HasValue() {
+		computed, err := templating.ResolveComputed(map[string]ComputedValue{variable.Name: *variable.Computed.Value}, allValues)
+		if err != nil {
+			return "", err
+		}
+		return computed[variable.Name], nil
+	}
+
 	transform, err := variable.ResolveTransform(config)
 	if err != nil {
 		return "", err
 	}
 
-	if variable.Computed && transform != nil && transform.Compose != "" {
+	if variable.Computed.IsLegacy() && transform != nil && transform.Compose != "" {
 		tmpl, err := transform.composeTemplate()
 		if err != nil {
 			return "", err

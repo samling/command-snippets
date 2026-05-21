@@ -81,8 +81,11 @@ func displayVariable(variable models.Variable) {
 	if variable.Required {
 		fmt.Printf("    Required: true\n")
 	}
-	if variable.Computed {
+	if variable.Computed.IsLegacy() || variable.Computed.HasValue() {
 		fmt.Printf("    Computed: true\n")
+	}
+	if variable.ComputedTemplate != "" {
+		fmt.Printf("    Computed Template: %s\n", variable.ComputedTemplate)
 	}
 
 	if variable.TransformTemplate != "" {

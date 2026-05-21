@@ -244,6 +244,9 @@ func mergeConfig(dst, src *models.Config, filename string, source models.Snippet
 	if dst.TransformTemplates == nil {
 		dst.TransformTemplates = make(map[string]models.TransformTemplate)
 	}
+	if dst.ComputedTemplates == nil {
+		dst.ComputedTemplates = make(map[string]models.ComputedTemplate)
+	}
 	if dst.VariableTypes == nil {
 		dst.VariableTypes = make(map[string]models.VariableType)
 	}
@@ -256,6 +259,12 @@ func mergeConfig(dst, src *models.Config, filename string, source models.Snippet
 			fmt.Printf("Warning: Transform template '%s' from %s overwrites existing template\n", name, filename)
 		}
 		dst.TransformTemplates[name] = template
+	}
+	for name, template := range src.ComputedTemplates {
+		if _, exists := dst.ComputedTemplates[name]; exists {
+			fmt.Printf("Warning: Computed template '%s' from %s overwrites existing template\n", name, filename)
+		}
+		dst.ComputedTemplates[name] = template
 	}
 	for name, varType := range src.VariableTypes {
 		if _, exists := dst.VariableTypes[name]; exists {
@@ -322,6 +331,7 @@ func defaultConfigYAML() ([]byte, error) {
 func createDefaultConfig() *models.Config {
 	return &models.Config{
 		TransformTemplates: make(map[string]models.TransformTemplate),
+		ComputedTemplates:  make(map[string]models.ComputedTemplate),
 		VariableTypes:      make(map[string]models.VariableType),
 		Snippets:           make(map[string]models.Snippet),
 		Settings: models.Settings{

@@ -25,29 +25,23 @@ func TestKubernetesConditionalNamespaceExample(t *testing.T) {
 		t.Fatal("expected conditional namespace example snippet")
 	}
 
-	if snippet.Command != "kubectl get pods ${namespace_arg}" {
+	if snippet.Command != "kubectl get pods ${namespace}" {
 		t.Fatalf("unexpected command %q", snippet.Command)
 	}
-	if len(snippet.Variables) != 2 {
-		t.Fatalf("got %d variables, want 2", len(snippet.Variables))
+	if len(snippet.Variables) != 1 {
+		t.Fatalf("got %d variables, want 1", len(snippet.Variables))
 	}
-	if snippet.Variables[0].Name != "namespace_mode" {
-		t.Fatalf("first variable = %q, want namespace_mode", snippet.Variables[0].Name)
+	if snippet.Variables[0].Name != "namespace" {
+		t.Fatalf("variable = %q, want namespace", snippet.Variables[0].Name)
 	}
-	if snippet.Variables[1].Name != "namespace" {
-		t.Fatalf("second variable = %q, want namespace", snippet.Variables[1].Name)
+	if snippet.Variables[0].ComputedTemplate != "namespace" {
+		t.Fatalf("computed_template = %q, want namespace", snippet.Variables[0].ComputedTemplate)
 	}
-	if snippet.Variables[1].VisibleIf != `namespace_mode == "named"` {
-		t.Fatalf("visible_if = %q", snippet.Variables[1].VisibleIf)
-	}
-	if snippet.Variables[1].RequiredIf != `namespace_mode == "named"` {
-		t.Fatalf("required_if = %q", snippet.Variables[1].RequiredIf)
-	}
-	if _, ok := snippet.Computed["namespace_arg"]; !ok {
-		t.Fatal("expected namespace_arg computed value")
+	if _, ok := cfg.ComputedTemplates["namespace"]; !ok {
+		t.Fatal("expected namespace computed template")
 	}
 
-	result, err := snippet.ProcessTemplate(map[string]string{"namespace_mode": "named", "namespace": "default"}, nil)
+	result, err := snippet.ProcessTemplate(map[string]string{"namespace": "default"}, &cfg)
 	if err != nil {
 		t.Fatalf("named namespace render failed: %v", err)
 	}
@@ -55,7 +49,7 @@ func TestKubernetesConditionalNamespaceExample(t *testing.T) {
 		t.Fatalf("named namespace result = %q", result)
 	}
 
-	result, err = snippet.ProcessTemplate(map[string]string{"namespace_mode": "all"}, nil)
+	result, err = snippet.ProcessTemplate(map[string]string{"namespace": "all"}, &cfg)
 	if err != nil {
 		t.Fatalf("all namespace render failed: %v", err)
 	}
@@ -96,7 +90,7 @@ func TestShippedSnippetsUseCurrentTemplateStyle(t *testing.T) {
 					if variable.Transform != nil {
 						t.Fatalf("%s/%s variable %s uses legacy transform", path, snippetName, variable.Name)
 					}
-					if variable.Computed {
+					if variable.Computed.IsLegacy() {
 						t.Fatalf("%s/%s variable %s uses legacy computed variable", path, snippetName, variable.Name)
 					}
 				}
@@ -117,8 +111,20 @@ func TestShippedCurrentStyleSnippetRendering(t *testing.T) {
 		{
 			name:    "kubernetes namespace mode",
 			snippet: "kubectl-get-pods",
-			values:  map[string]string{"namespace_mode": "named", "namespace": "default"},
+			values:  map[string]string{"namespace": "default"},
 			want:    "kubectl get pods -n default",
+		},
+		{
+			name:    "kubernetes all namespaces",
+			snippet: "kubectl-get-pods",
+			values:  map[string]string{"namespace": "all"},
+			want:    "kubectl get pods -A",
+		},
+		{
+			name:    "kubernetes empty namespace",
+			snippet: "kubectl-get-pods",
+			values:  map[string]string{"namespace": ""},
+			want:    "kubectl get pods",
 		},
 		{
 			name:    "docker optional flags",
@@ -190,6 +196,7 @@ func loadShippedSnippetConfig(t *testing.T) *Config {
 		Snippets:           make(map[string]Snippet),
 		VariableTypes:      make(map[string]VariableType),
 		TransformTemplates: make(map[string]TransformTemplate),
+		ComputedTemplates:  make(map[string]ComputedTemplate),
 	}
 	paths, err := filepath.Glob(filepath.Join("..", "..", "snippets", "*.yaml"))
 	if err != nil {
@@ -212,6 +219,9 @@ func loadShippedSnippetConfig(t *testing.T) *Config {
 		}
 		for name, transformTemplate := range partial.TransformTemplates {
 			cfg.TransformTemplates[name] = transformTemplate
+		}
+		for name, computedTemplate := range partial.ComputedTemplates {
+			cfg.ComputedTemplates[name] = computedTemplate
 		}
 	}
 	return cfg

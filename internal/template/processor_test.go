@@ -568,7 +568,7 @@ func TestProcessSnippet_ErrorHandling(t *testing.T) {
 				Variables: []models.Variable{
 					{
 						Name:     "var",
-						Computed: true,
+						Computed: models.VariableComputed{Legacy: true},
 						Transform: &models.Transform{
 							Compose: "{{.invalid syntax",
 						},

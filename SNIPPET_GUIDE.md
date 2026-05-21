@@ -109,7 +109,8 @@ Variables are placeholders in your command template denoted by `<variable_name>`
 | `validation` | object | Validation rules (see [Validation](#validation)) |
 | `transform` | object | Expert variable-level transform rules (see [Expert Transform Rules](#expert-transform-rules)) |
 | `transform_template` | string | Reference to a reusable expert transform template |
-| `computed` | boolean | Expert variable-level computed value (default: false) |
+| `computed` | boolean or object | Legacy boolean computed variable, or inline expression-based computed output |
+| `computed_template` | string | Reference to a reusable expression-based computed template |
 
 ### Variable Types
 
@@ -287,6 +288,52 @@ computed:
       - default: true
         value: ""
 ```
+
+### Variable-Level Computed Values
+
+Use variable-level `computed` when the variable should still be prompted, but its rendered command value should be derived from the raw input:
+
+```yaml
+variables:
+  - name: "namespace"
+    description: "Namespace name, all, or empty"
+    default: ""
+    computed:
+      cases:
+        - when: namespace == "all"
+          value: "-A"
+        - when: '!empty(namespace)'
+          value: '${flag("-n", namespace)}'
+        - default: true
+          value: ""
+command: "kubectl get pods ${namespace}"
+```
+
+Define reusable computed templates at the config root and reference them from variables with `computed_template`:
+
+```yaml
+computed_templates:
+  namespace:
+    description: "Kubernetes namespace flag"
+    cases:
+      - when: namespace == "all"
+        value: "-A"
+      - when: '!empty(namespace)'
+        value: '${flag("-n", namespace)}'
+      - default: true
+        value: ""
+
+snippets:
+  kubectl-get-pods:
+    command: "kubectl get pods ${namespace}"
+    variables:
+      - name: "namespace"
+        description: "Namespace name, all, or empty"
+        default: ""
+        computed_template: "namespace"
+```
+
+Computed templates evaluate with the variable's raw input values. In the namespace example, an empty value is omitted, `all` renders `-A`, and any other value renders `-n <value>`.
 
 ### Expression Helpers
 

@@ -1,24 +1,4 @@
 snippets:
-  grep-with-custom-regex:
-    id: grep-regex
-    name: Grep with Custom Regex
-    description: Search files using a custom regular expression pattern
-    command: grep -E ${pattern_arg} ${files_arg}
-    variables:
-      - name: pattern
-        description: Regular expression pattern to search for
-        type: regex
-        required: true
-      - name: files
-        description: Files to search in
-        default: "*.txt"
-        required: false
-    computed:
-      pattern_arg:
-        value: "quote(pattern)"
-      files_arg:
-        value: "files"
-
   sed-replace:
     id: sed-replace
     name: Sed Replace with Regex
@@ -70,29 +50,3 @@ snippets:
         value: 'quote("s/" + search_pattern + "/" + replacement + "/" + (global == "true" ? "g" : ""))'
       file_arg:
         value: "file"
-
-  log-analyzer:
-    id: log-analyzer
-    name: Analyze Logs with Regex
-    description: Extract specific patterns from log files
-    command: awk ${awk_script} ${logfile_arg} | sed -E ${sed_script}
-    variables:
-      - name: pattern
-        description: Initial filter pattern (must be valid regex)
-        type: regex
-        required: true
-      - name: extract_pattern
-        description: Pattern to extract specific parts (must be valid regex with capture groups)
-        type: regex
-        default: "(.*)"
-        required: false
-      - name: logfile
-        description: Log file to analyze
-        required: true
-    computed:
-      awk_script:
-        value: 'quote("/" + pattern + "/ {print $0}")'
-      logfile_arg:
-        value: "logfile"
-      sed_script:
-        value: 'quote("s/" + extract_pattern + "/\\1/g")'

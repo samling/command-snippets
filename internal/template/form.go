@@ -199,7 +199,7 @@ func newFormModel(snippet *models.Snippet, presetValues map[string]string, confi
 	}
 
 	for _, variable := range snippet.Variables {
-		if variable.Computed {
+		if variable.Computed.IsLegacy() {
 			continue // Skip computed variables
 		}
 
@@ -648,6 +648,13 @@ func (m formModel) renderCommandPreview() string {
 			}
 			return ""
 		}
+		if variable, ok := varByName[name]; ok {
+			val := m.previewVariable(*variable, valueMap[name], valueMap)
+			if val != "" {
+				return filledVarStyle.Render(val)
+			}
+			return ""
+		}
 		if val, ok := valueMap[name]; ok && val != "" {
 			return filledVarStyle.Render(val)
 		}
@@ -663,14 +670,14 @@ func (m formModel) renderCommandPreview() string {
 
 		rawValue := ""
 		isFilled := false
-		if !variable.Computed {
+		if !variable.Computed.IsLegacy() {
 			rawValue = valueMap[name]
 			isFilled = filledMap[name]
 		}
 		transformedValue := m.previewVariable(*variable, rawValue, valueMap)
 
 		switch {
-		case variable.Computed:
+		case variable.Computed.IsLegacy():
 			if transformedValue != "" {
 				return filledVarStyle.Render(transformedValue)
 			}
@@ -684,7 +691,7 @@ func (m formModel) renderCommandPreview() string {
 		}
 	})
 
-	if len(m.snippet.Computed) > 0 {
+	if len(m.snippet.Computed) > 0 || formHasVariableComputedValues(m.snippet) {
 		result = templating.NormalizeCommandWhitespace(result)
 	}
 
@@ -699,6 +706,18 @@ func (m formModel) renderCommandPreview() string {
 	b.WriteString(result)
 
 	return commandPreviewStyle.Render(b.String())
+}
+
+func formHasVariableComputedValues(snippet *models.Snippet) bool {
+	if snippet == nil {
+		return false
+	}
+	for _, variable := range snippet.Variables {
+		if variable.Computed.HasValue() || variable.ComputedTemplate != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // View renders the form
@@ -1029,7 +1048,7 @@ func promptForVariablesWithBubbleTea(snippet *models.Snippet, presetValues map[s
 	allVariablesPreset := true
 	values := make(map[string]string)
 	for _, variable := range snippet.Variables {
-		if !variable.Computed {
+		if !variable.Computed.IsLegacy() {
 			hasUserVariables = true
 			value := variable.DefaultValue
 			if presetValue, exists := presetValues[variable.Name]; exists {
