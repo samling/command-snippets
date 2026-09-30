@@ -1,538 +1,78 @@
 # CS - Command Snippets
 
-**CS** (Command Snippets) is a powerful CLI tool for managing command templates with intelligent variable substitution. It goes beyond simple snippet storage by providing conditional transformations, reusable template patterns, and smart variable processing.
+CS is a terminal command library. Search friendly names, browse tag categories, fill inputs with a live preview, and insert the finished command into your shell. CS does not execute commands unless you explicitly use `exec --run` or `exec --prompt`.
 
-## Features
+**Incompatible format change:** libraries now use a YAML sequence with `name`, `command`, tags and optional inputs. Legacy keyed snippets, variables, transforms, computed blocks, selectors and `${...}` interpolation are no longer supported. CS reports invalid files without rewriting them. Existing installed files are not replaced automatically; see [the authoring guide](SNIPPET_GUIDE.md) for the new format.
 
-- **Intelligent Template Engine**: Variable transformations with conditional logic
-- **Reusable Transformation Patterns**: Define transformation rules once, use across multiple commands
-- **Interactive Execution**: Smart prompting with validation and defaults
-- **Flexible Configuration**: YAML-based configuration with inheritance
-- **Tag-based Organization**: Organize and search templates by tags
-- **Shell Integration**: Execute commands directly or copy to clipboard
+## Install and start
 
-## Quick Start
-
-### Installation
-
-```bash
-# Build from source
-git clone https://github.com/samling/command-snippets.git
-cd command-snippets
-
-# Build and install the binary
-make install
-
-# Or install directly with Go
+```sh
 go install github.com/samling/command-snippets/cmd/cs@latest
-```
-
-After installing the binary, run `cs init` for first-time setup.
-
-### First-Time Setup
-
-Run `cs init` once to create your user config and copy the default snippet files:
-
-```bash
 cs init
+cs
 ```
 
-This creates `$XDG_CONFIG_HOME/cs/config.yaml` when `XDG_CONFIG_HOME` is set, otherwise `~/.config/cs/config.yaml`, plus editable snippets in `snippets/*.yaml` next to that config file.
+Build from source with `go build -o /tmp/cs ./cmd/cs`, or use the repository's `make install` when installation is intended. Go 1.24 or later is required.
 
-The copied snippets are user-owned. You can edit or delete them; CS will not recreate deleted snippets unless you run `cs init --missing` or overwrite them with `cs init --force`.
+`cs init` creates `$XDG_CONFIG_HOME/cs/config.yaml`, or `~/.config/cs/config.yaml`, and copies editable examples into the adjacent `snippets/` directory. Existing files are skipped. `cs init --missing` restores absent examples; `cs init --force` explicitly overwrites defaults. These options do not convert old libraries.
 
-**Note:** The `snippets/` directory in this repository contains example snippet files that you can use as reference for creating your own templates.
+The smallest library is:
 
-**Want to create your own snippets?** See the **[Snippet Creation Guide](SNIPPET_GUIDE.md)** for comprehensive documentation on creating command templates with variables, transformations, and validation.
+```yaml
+snippets:
+  - name: List pods
+    tags: [Kubernetes]
+    command: kubectl get pods
+```
 
-### Basic Usage
+## Find, fill, insert
 
-```bash
-# Add your first command template
+Search starts focused. Names, descriptions, tags and literal commands are searchable. Multiple selected tags intersect; All clears category filters and Untagged finds uncategorized commands. Duplicate names remain separate entries distinguished by source. Tags are trimmed and case-folded for matching.
+
+| Key | Library action |
+| --- | --- |
+| Tab / Shift-Tab | Switch search, categories, results and detail |
+| Up / Down | Select a command, or a category in its pane |
+| Enter | Fill the selected command's inputs, then confirm insertion |
+| Ctrl-L / Ctrl-R | Clear query and filters / reload files |
+| Ctrl-N / Ctrl-E / Ctrl-O | New command / edit selected command / settings |
+| Ctrl-D | Toggle detail on a medium-width terminal |
+| F1 | Contextual help |
+| Esc / Ctrl-C | Cancel with no command output |
+
+In the input view, arrows cycle choices, Tab navigates, and Enter advances or submits the last field; Ctrl-S submits from any input field. Esc returns to the previous search and filters. Required and invalid inputs block insertion. Repeat inputs have separate item rows; spaces within an item are retained. No preview executes a command.
+
+In the editor, Ctrl-Left/Right switches Basics, Inputs, Advanced and Test. Alt-Enter inserts a command newline. Ctrl-P marks a start and end cursor position and opens guided input controls. Ctrl-S validates and saves; dirty cancellation asks before discarding. Settings controls manage source order, project discovery, destination and color.
+
+## CLI
+
+```sh
 cs add
-
-# List all templates
-cs list
-
-# Execute a template interactively
-cs exec kubectl-get-pods
-
-# Search for templates
-cs search kubernetes
+cs edit 'List pods'
+cs list --query pods --tag Kubernetes
+cs list --json
+cs describe 'List pods'
+cs validate
+cs render 'Pod resource usage, sorted' --set namespace=all --set sort_by=Memory
+cs exec 'List pods' --set namespace=team-a
 ```
 
-## Shell Integration
+`render` never opens a terminal or executes anything. It applies defaults and the same validation as the preview. `exec` opens input entry when values are incomplete; `--run` and `--prompt` are explicit, mutually exclusive execution modes. NAME lookup is exact and case-sensitive. Ambiguous names require workspace selection or `--id UUID`. `list --json` and `describe` expose persisted IDs for automation; ordinary panes hide them. ID-less definitions are valid, and saving one assigns an ID only to that entry. Renaming retains its ID.
 
-CS is designed to integrate seamlessly with your shell workflow. The default behavior outputs clean commands to stdout, making it perfect for shell functions and keybindings.
+Use `--config PATH` for another main file and `--no-color` to override color. Interactive paths require a terminal on stderr; their input comes from the controlling terminal even when stdout is captured. UI, diagnostics and save messages go to stderr. Cancellation exits 0 with empty stdout; fatal errors exit nonzero without a partial command. Help, list, describe and config generation intentionally print their requested data.
 
-### Execution Modes
+## Ctrl-S shell integration
 
-```bash
-# Print final command only
-cs exec kubectl-get-pods
+Source [zshrc-snippet.sh](zshrc-snippet.sh) from Zsh or [bashrc-snippet.sh](bashrc-snippet.sh) from Bash. Both release Ctrl-S with `stty -ixon`, call bare `cs`, check its exit status separately, and insert only a nonempty successful result. Neither executes the result or presses Enter.
 
-# Prompt before executing
-cs exec kubectl-get-pods --prompt
+Zsh appends to `LBUFFER`, retaining text to the right of the cursor, and redisplays after success, failure or cancellation. Bash splices at `READLINE_POINT`. The Bash example uses character offsets; Readline/Bash versions reporting byte offsets in multibyte locales need an adapted binding. Command substitution strips trailing newlines. Zsh is recommended for Unicode-heavy command lines.
 
-# Execute automatically without prompting
-cs exec kubectl-get-pods --run
-```
+## Files and safe saves
 
-### Pre-setting Variables
+The main configuration owns settings; included files and current-directory `.csnippets` own only snippets. No parent-directory project search occurs. See [SNIPPET_GUIDE.md](SNIPPET_GUIDE.md) for source settings and input syntax.
 
-Like Helm, CS supports pre-populating template variables using `--set`:
+Edits save only the owning source. Unrelated snippets and surrounding bytes remain unchanged. Unsupported YAML layouts fail rather than trigger a lossy rewrite. Save conflicts keep the draft. Symlink sources are readable but read-only. A sibling `.cs.lock` coordinates CS writers; inspect the owner before manually removing a crash-stale lock. CS checks content, identity and permissions before replacement, but an external editor can still race between the final check and rename. A directory-sync error means bytes were saved but durability is uncertain; CS reloads instead of blindly retrying.
 
-```bash
-# Set single variable
-cs exec kubectl-get-pods --set namespace=kube-system
+Commands, choice outputs, special mappings and expressions are trusted authored shell syntax. CS quotes normal text, flag values and repeated values, but it does not make an authored command safe to execute.
 
-# Set multiple variables
-cs exec docker-run --set port=8080 --set image=nginx --set detach=true
-
-# Mix preset and interactive (only prompts for unset variables)
-cs exec kubectl-port-forward --set namespace=default
-# Will only prompt for pod_name and ports
-
-# Use with automation/scripting
-cs exec kubectl-apply --set file=deployment.yaml --run
-```
-
-**Benefits of `--set`:**
-- **Automation**: Perfect for CI/CD pipelines and scripts
-- **Speed**: Skip interactive prompts for known values
-- **Flexibility**: Mix preset and interactive variables
-- **Validation**: All `--set` values go through the same validation as interactive input
-- **Error Handling**: Clear error messages for invalid preset values
-
-### Zsh Keybinding Integration
-
-Create a zsh function to invoke CS with a keybinding (e.g., Ctrl-S) that inserts the generated command directly into your command line:
-
-**Setup:**
-
-Add this to your `~/.zshrc`:
-
-```zsh
-# CS integration - Ctrl-S to invoke template selector
-function cs-select() {
-  RBUFFER=$(cs exec)  # Uses default config: ~/.config/cs/config.yaml
-  CURSOR=$#BUFFER
-  zle redisplay
-}
-
-# Register the function as a zle widget
-zle -N cs-select
-
-# Disable terminal flow control (frees up Ctrl-S)
-stty -ixon
-
-# Bind Ctrl-S to our function
-bindkey '^s' cs-select
-```
-
-**Usage:**
-
-1. **Press Ctrl-S** → CS opens with your configured selector (e.g., fzf)
-2. **Select a template** → Interactive prompts appear for variables
-3. **Fill in variables** → Validation ensures correct input
-4. **Command appears** → Generated command is inserted at your cursor position
-
-### External Selector Configuration
-
-CS supports external selectors like fzf, rofi, or dmenu for better template selection:
-
-```yaml
-# In your ~/.config/cs/config.yaml
-settings:
-  selector:
-    command: "fzf"
-    options: "--height 40% --reverse --border --header='Select template:'"
-```
-
-### Bash Integration
-
-For bash users, you can create a similar function:
-
-```bash
-# Add to ~/.bashrc
-cs-select() {
-  local cmd=$(cs exec)  # Uses default config: ~/.config/cs/config.yaml
-  if [[ -n "$cmd" ]]; then
-    READLINE_LINE="${READLINE_LINE:0:$READLINE_POINT}$cmd${READLINE_LINE:$READLINE_POINT}"
-    READLINE_POINT=$((READLINE_POINT + ${#cmd}))
-  fi
-}
-
-# Bind to Ctrl-S
-bind -x '"\C-s": cs-select'
-```
-
-### Pipeline Integration
-
-CS's clean stdout makes it perfect for pipelines:
-
-```bash
-# Save command to file
-cs exec kubectl-get-pods > my-command.sh
-
-# Execute directly
-cs exec kubectl-get-pods | sh
-
-# Modify and execute
-cs exec kubectl-get-pods | sed 's/kubectl/sudo kubectl/' | sh
-
-# Copy to clipboard (with xclip or pbcopy)
-cs exec kubectl-get-pods | xclip -selection clipboard
-```
-
-## Configuration Organization
-
-CS supports modular configuration to help organize your templates:
-
-### Single Config File (Default)
-
-The simplest approach - everything in one file:
-
-```yaml
-# ~/.config/cs/config.yaml
-transform_templates:
-  k8s-namespace:
-    # ... transform rules
-    
-variable_types:
-  port:
-    # ... validation rules
-    
-snippets:
-  kubectl-get-pods:
-    # ... your templates
-
-settings:
-  # ... settings
-```
-
-### Modular Configuration
-
-For better organization, split configuration into separate files:
-
-```yaml
-# ~/.config/cs/config.yaml
-transform_templates:
-  # Shared transform templates
-  k8s-namespace:
-    description: "Kubernetes namespace: empty=none, 'all'=-A, name=-n <name>"
-    transform:
-      empty_value: ""
-      value_pattern: |
-        {{- if eq .Value "all" -}}
-          -A
-        {{- else -}}
-          -n {{.Value}}
-        {{- end -}}
-
-variable_types:
-  # Shared variable types
-  port:
-    description: "Network port"
-    validation:
-      range: [1, 65535]
-    default: "8080"
-
-snippets:
-  # Core snippets can still go here
-  
-settings:
-  # Load additional configuration files
-  additional_configs:
-    - "snippets/*.yaml"  # Glob patterns work too
-    - "~/my-custom-snippets.yaml"  # Absolute paths work too
-```
-
-Then organize your snippets by topic:
-
-```yaml
-# ~/.config/cs/snippets/kubernetes.yaml
-snippets:
-  kubectl-describe-pod:
-    description: "Describe a specific pod"
-    command: "kubectl describe pod <pod_name> <namespace>"
-    variables:
-      - name: "pod_name"
-        description: "Pod name to describe"
-        required: true
-      - name: "namespace"
-        transformTemplate: "k8s-namespace"  # References main config
-    tags: ["kubernetes", "describe"]
-```
-
-### Local Project Snippets
-
-CS also supports project-specific snippets via `.csnippets` files:
-
-```yaml
-# .csnippets (in your project directory)
-snippets:
-  dev-build:
-    description: "Build this project"
-    command: "go build -o ./bin/<project_name> ."
-    variables:
-      - name: "project_name"
-        description: "Project binary name"
-        default: "myapp"
-    tags: ["development", "build"]
-  
-  dev-test:
-    description: "Run project tests with coverage"
-    command: "go test -cover ./..."
-    tags: ["development", "test"]
-```
-
-**How it works:**
-- CS automatically looks for `.csnippets` in your current working directory
-- Local snippets are loaded in addition to your global configuration
-- Local snippets can override global ones (you'll see a warning)
-- Perfect for project-specific build, test, and deployment commands
-- Can be committed to share with your team or kept local (ignored by default in `.gitignore`)
-
-### Benefits of Modular Organization
-
-- **Team Sharing**: Share topic-specific snippet files across team members
-- **Maintainability**: Easier to manage large collections of templates
-- **Flexibility**: Mix and match snippet collections for different projects
-- **Version Control**: Track changes to specific command categories separately
-- **Project Context**: Local `.csnippets` files provide project-specific commands
-
-## Creating Snippets
-
-For comprehensive documentation on creating snippets, see the **[Snippet Creation Guide](SNIPPET_GUIDE.md)**.
-
-The guide covers:
-- How to create snippets and variables
-- All variable fields and options
-- Transformations and transform templates
-- Computed variables
-- Validation rules
-- Advanced examples and best practices
-
-## Core Concepts
-
-### Transform Templates
-Transform templates define reusable transformation logic that can be referenced by multiple variables. They contain the transformation rules for how variables should behave.
-
-### Variables  
-Variables in commands are denoted with `<variable_name>` and must be **explicitly defined** in each snippet. Each variable can have:
-- **Transform templates**: Reference to reusable transformation logic
-- **Inline transforms**: Custom transformation defined directly in the variable
-- **Default values**: Used when no input provided
-- **Validation**: Ensure input meets criteria
-- **Types**: Boolean, enum, string, etc.
-
-## Examples
-
-### Kubernetes Namespace Pattern
-A common pattern where an empty namespace should default to all namespaces, but a specific namespace should be properly formatted:
-
-```yaml
-# Define reusable transform template
-transform_templates:
-  k8s-namespace:
-    description: "Kubernetes namespace with -A default"
-    transform:
-      empty_value: "-A"
-      value_pattern: "-n {{.Value}}"
-
-# Use the template in a snippet
-snippets:
-  kubectl-get-pods:
-    description: "Get pods with optional namespace"
-    command: "kubectl get pods <namespace>"
-    variables:
-      - name: "namespace" # Reference the variable above
-        description: "Kubernetes namespace"
-        transformTemplate: "k8s-namespace"  # Reference the template
-```
-
-**Usage:**
-```bash
-$ cs exec kubectl-get-pods
-namespace (Kubernetes namespace): [Enter]
-Executing: kubectl get pods -A
-
-$ cs exec kubectl-get-pods  
-namespace (Kubernetes namespace): kube-system
-Executing: kubectl get pods -n kube-system
-```
-
-This demonstrates explicit variable configuration with reusable transformation templates.
-
-## CLI Commands
-
-### `cs add`
-Add a new command template interactively:
-```bash
-cs add    # Interactive template creation with explicit variable configuration
-```
-
-During creation, you'll be prompted to configure each variable found in your command template. You can choose:
-- **No transformation**: Simple variable substitution
-- **Inline transform**: Custom transformation defined directly
-- **Transform template**: Reference to reusable transformation logic
-
-### `cs list`
-List and filter templates:
-```bash
-cs list                  # List all templates (grouped by source)
-cs list --tags kubernetes # Filter by tags
-cs list --verbose        # Show detailed info
-```
-
-The `list` command automatically groups templates by source:
-- **Local (project-specific) templates**: Snippets loaded from `.csnippets` in your current directory
-- **Global templates**: Snippets from your main config and additional config files
-
-This makes it easy to see which commands are available globally vs just in the current project.
-
-### `cs exec`
-Execute templates with interactive prompting:
-```bash
-cs exec kubectl-get-pods # Execute specific template
-cs exec                  # Interactive selection
-```
-
-### `cs search`
-Search through templates:
-```bash
-cs search kubectl        # Find templates containing "kubectl"
-cs search "get pods"     # Multi-word search
-```
-
-### `cs show`
-Display configuration components:
-```bash
-cs show transforms       # Show all transform templates
-cs show types           # Show all variable types
-cs show config          # Show configuration summary
-```
-
-The `show` command helps you understand what building blocks are available:
-- **`cs show transforms`**: Display all transform templates with their patterns and logic
-- **`cs show types`**: Show variable types with validation rules and defaults  
-- **`cs show config`**: Overview of your entire configuration (templates, types, snippets, settings)
-
-This is especially useful when creating new templates or debugging configuration issues.
-
-### `cs describe`
-Show detailed information about a template:
-```bash
-cs describe kubectl-get-pods      # Show template details and variables
-cs describe docker-run            # Show validation rules and defaults
-```
-
-The `describe` command shows:
-- Template description and command pattern
-- All variables with their types, validation rules, and defaults
-- Computed variables and their composition logic
-- Transform templates being used
-- Tags for organization
-
-This is perfect for understanding what variables a template expects before running it, especially useful when using `--set` flags or in automation scenarios.
-
-### `cs edit`
-Edit templates or configuration:
-```bash
-cs edit kubectl-get-pods # Edit specific template
-cs edit --config         # Edit configuration file
-```
-
-
-## Advanced Examples
-
-### Boolean Flags with Transform Templates
-Handle optional flags elegantly with reusable templates:
-
-```yaml
-transform_templates:
-  follow-flag:
-    description: "Follow logs flag"
-    transform:
-      true_value: "-f"
-      false_value: ""
-
-snippets:
-  kubectl-logs:
-    command: "kubectl logs <pod> <follow>"
-    variables:
-      - name: "pod"
-        description: "Pod name"
-        required: true
-      - name: "follow"
-        description: "Follow logs"
-        type: "boolean"
-        transformTemplate: "follow-flag"
-```
-
-### Complex Compositions
-Combine multiple variables with computed values:
-
-```yaml
-snippets:
-  git-checkout:
-    command: "git checkout <branch_ref>"
-    variables:
-      - name: "branch"
-        description: "Branch name"
-        required: true
-      - name: "remote"
-        description: "Remote name"
-        default: "origin"
-      - name: "branch_ref"
-        description: "Full branch reference"
-        computed: true
-        transform:
-          compose: "{{.remote}}/{{.branch}}"
-```
-
-### Inline Transforms
-Custom transformation logic defined directly:
-
-```yaml
-snippets:
-  docker-run:
-    command: "docker run <port> <image>"
-    variables:
-      - name: "port"
-        description: "Port mapping"
-        transform:
-          empty_value: ""  # No port flag if empty
-          value_pattern: "-p {{.Value}}:{{.Value}}"  # Map port
-      - name: "image"
-        description: "Docker image"
-        required: true
-```
-
-## Example Workflow
-
-1. **Define a transform template:**
-   ```yaml
-   transform_templates:
-     docker-port:
-       description: "Docker port mapping"
-       transform:
-         empty_value: ""
-         value_pattern: "-p {{.Value}}:{{.Value}}"
-   ```
-
-2. **Create snippets with explicit variables:**
-   ```bash
-   cs add
-   # You'll be prompted to configure each variable explicitly
-   # You can choose to use transform templates or inline transforms
-   ```
-
-3. **Execute with smart prompting:**
-   ```bash
-   cs exec docker-run
-   port_mapping (Port mapping (empty for none)): 8080
-   image_name (Docker image name): nginx
-   Executing: docker run -p 8080:8080 nginx
-   ```
+[Testing and scratch verification](TESTING.md)

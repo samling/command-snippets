@@ -1,261 +1,67 @@
-# Kubernetes-specific command snippets
 snippets:
-  kubectl-describe-pod:
-    id: "kubectl-describe-pod"
-    name: "kubectl-describe-pod"
-    description: "Describe a specific pod"
-    command: "kubectl describe pod ${pod_name_arg} ${namespace_arg}"
-    variables:
-      - name: "pod_name"
-        description: "Pod name to describe"
+  - id: 33f4fe80-8732-48c7-8183-4de4fd2fb003
+    name: List pods
+    description: List pods in the current namespace, a named namespace, or all namespaces.
+    tags: [Kubernetes]
+    command: kubectl get pods {{namespace}}
+    inputs:
+      - name: namespace
+        label: Namespace
+        help: Leave empty for the current namespace; enter all for all namespaces.
+        kind: flag
+        flag: -n
+        special: {all: -A}
+  - id: 1cda91ea-5612-4263-816f-7dad0e4f4263
+    name: Pod resource usage, sorted
+    description: Show pod CPU or memory usage, highest first.
+    tags: [Kubernetes, Monitoring]
+    command: |-
+      kubectl top pods {{namespace}} --no-headers |
+        awk 'NF == 3 {print "-", $0; next} {print}' |
+        { header='NAMESPACE NAME CPU MEMORY'; printf '%s\n' "$header"; sort -k{{sort_by}},{{sort_by}} -h -r; }
+    inputs:
+      - name: namespace
+        label: Namespace
+        kind: flag
+        flag: -n
+        special: {all: -A}
+      - name: sort_by
+        label: Sort by
+        kind: choice
+        default: CPU
+        choices:
+          - {label: CPU, value: "3"}
+          - {label: Memory, value: "4"}
+  - id: 584b5121-61fd-496d-80a5-957ca043cc74
+    name: Get pods in a chosen namespace
+    tags: [Kubernetes]
+    command: kubectl get pods {{mode}} {{namespace}}
+    inputs:
+      - name: mode
+        kind: choice
+        choices:
+          - {label: Default, value: ""}
+          - {label: All, value: -A}
+          - {label: Named, value: ""}
+      - name: namespace
+        kind: flag
+        flag: -n
+        visible_when: {input: mode, equals: Named}
+        required_when: {input: mode, equals: Named}
+        validate: {pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'}
+  - id: 7211d15e-3baa-4de5-8275-2e885b0ba46c
+    name: Forward a service port
+    tags: [Kubernetes, Networking]
+    command: kubectl port-forward {{resource}} {{ports}} {{namespace}}
+    inputs:
+      - {name: service, required: true}
+      - name: host_port
+        default: "8080"
         required: true
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: namespace_mode == "named"
-        required_if: namespace_mode == "named"
-    computed:
-      pod_name_arg:
-        value: "pod_name"
-      namespace_arg:
-        cases:
-          - when: namespace_mode == "all"
-            value: "-A"
-          - when: namespace_mode == "named"
-            value: '${flag("-n", namespace)}'
-          - default: true
-    tags: ["kubernetes", "describe", "pods"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
-
-  kubectl-get-services:
-    id: "kubectl-get-services"
-    name: "kubectl-get-services"
-    description: "Get Kubernetes services"
-    command: "kubectl get services ${namespace_arg}"
-    variables:
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: namespace_mode == "named"
-        required_if: namespace_mode == "named"
-    computed:
-      namespace_arg:
-        cases:
-          - when: namespace_mode == "all"
-            value: "-A"
-          - when: namespace_mode == "named"
-            value: '${flag("-n", namespace)}'
-          - default: true
-    tags: ["kubernetes", "services"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
-
-  kubectl-apply:
-    id: "kubectl-apply"
-    name: "kubectl-apply"
-    description: "Apply Kubernetes manifests"
-    command: "kubectl apply -f ${manifest_file_arg} ${namespace_arg}"
-    variables:
-      - name: "manifest_file"
-        description: "Path to Kubernetes manifest file"
-        required: true
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: namespace_mode == "named"
-        required_if: namespace_mode == "named"
-    computed:
-      manifest_file_arg:
-        value: "manifest_file"
-      namespace_arg:
-        cases:
-          - when: namespace_mode == "all"
-            value: "-A"
-          - when: namespace_mode == "named"
-            value: '${flag("-n", namespace)}'
-          - default: true
-    tags: ["kubernetes", "apply", "manifest"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
-
-  kubectl-get-pods:
-    id: "kubectl-get-pods"
-    name: "kubectl-get-pods"
-    description: "Get Kubernetes pods with namespace selection"
-    command: "kubectl get pods ${namespace_arg}"
-    variables:
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: namespace_mode == "named"
-        required_if: namespace_mode == "named"
-    computed:
-      namespace_arg:
-        cases:
-          - when: namespace_mode == "all"
-            value: "-A"
-          - when: namespace_mode == "named"
-            value: '${flag("-n", namespace)}'
-          - default: true
-    tags: ["kubernetes", "pods"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
-
-  kubectl-get-pods-conditional-namespace:
-    id: "kubectl-get-pods-conditional-namespace"
-    name: "kubectl-get-pods-conditional-namespace"
-    description: "Get pods with a namespace prompt that appears only when needed"
-    command: "kubectl get pods ${namespace_arg}"
-    variables:
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: namespace_mode == "named"
-        required_if: namespace_mode == "named"
-    computed:
-      namespace_arg:
-        cases:
-          - when: namespace_mode == "all"
-            value: "-A"
-          - when: namespace_mode == "named"
-            value: '${flag("-n", namespace)}'
-          - default: true
-    tags: ["kubernetes", "pods", "example", "conditional"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
-
-  kubectl-logs:
-    id: "kubectl-logs"
-    name: "kubectl-logs"
-    description: "Get logs from a pod in a namespace"
-    command: "kubectl logs ${pod_name_arg} ${namespace_arg} ${follow_arg}"
-    variables:
-      - name: "pod_name"
-        description: "Pod name"
-        required: true
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: namespace_mode == "named"
-        required_if: namespace_mode == "named"
-      - name: "follow"
-        description: "Follow logs"
-        type: "boolean"
-        default: "false"
-    computed:
-      pod_name_arg:
-        value: "pod_name"
-      namespace_arg:
-        cases:
-          - when: namespace_mode == "all"
-            value: "-A"
-          - when: namespace_mode == "named"
-            value: '${flag("-n", namespace)}'
-          - default: true
-      follow_arg:
-        value: 'boolFlag("-f", follow)'
-    tags: ["kubernetes", "logs"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
-
-  kubectl-port-forward:
-    id: "kubectl-port-forward"
-    name: "kubectl-port-forward"
-    description: "Forward local port to pod or service"
-    command: "kubectl port-forward ${resource_arg} ${port_mapping_arg} ${namespace_arg}"
-    variables:
-      - name: "resource_type"
-        required: true
-        description: "Resource type: [pod, svc]"
-        default: "svc"
-        choices: ["pod", "svc"]
-      - name: "resource_name"
-        required: true
-        description: "Resource name (e.g., my-pod, my-service)"
-      - name: "host_port"
-        description: "Host port (e.g., 8080)"
-        required: true
-        type: "port"
-      - name: "target_port"
-        description: "Target port (leave empty to use host port)"
-        default: ""
-        type: "port"
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: namespace_mode == "named"
-        required_if: namespace_mode == "named"
-    computed:
-      resource_arg:
-        value: 'resource_type + "/" + resource_name'
-      port_mapping_arg:
-        value: 'host_port + ":" + default(target_port, host_port)'
-      namespace_arg:
-        cases:
-          - when: namespace_mode == "all"
-            value: "-A"
-          - when: namespace_mode == "named"
-            value: '${flag("-n", namespace)}'
-          - default: true
-    tags: ["kubernetes", "port-forward", "networking"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
-
-  kubectl-get-pods-advanced:
-    id: "kubectl-get-pods-advanced"
-    name: "kubectl-get-pods-advanced"
-    description: "Advanced kubectl get pods with multiple options"
-    command: "kubectl get pods ${namespace_arg} ${output_arg} ${selector_arg}"
-    variables:
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: namespace_mode == "named"
-        required_if: namespace_mode == "named"
-      - name: "output"
-        description: "Output format"
-        choices: ["", "wide", "yaml", "json"]
-        empty_label: "default"
-      - name: "selector"
-        description: "Label selector"
-        default: ""
-    computed:
-      namespace_arg:
-        cases:
-          - when: namespace_mode == "all"
-            value: "-A"
-          - when: namespace_mode == "named"
-            value: '${flag("-n", namespace)}'
-          - default: true
-      output_arg:
-        value: 'flag("-o", output)'
-      selector_arg:
-        value: 'flag("--selector", selector)'
-    tags: ["kubernetes", "pods", "advanced"]
-    created_at: "2025-01-01T00:00:00Z"
-    updated_at: "2025-01-01T00:00:00Z"
+        validate: {range: [1, 65535]}
+      - name: target_port
+        validate: {range: [1, 65535]}
+      - {name: namespace, kind: flag, flag: -n}
+    expressions:
+      resource: 'quote("svc/" + inputs.service)'
+      ports: 'quote(inputs.host_port + ":" + default(inputs.target_port, inputs.host_port))'

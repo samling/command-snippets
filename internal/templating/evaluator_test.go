@@ -3,246 +3,78 @@ package templating
 import (
 	"strings"
 	"testing"
+
+	"github.com/samling/command-snippets/internal/models"
 )
 
-func TestHelpers(t *testing.T) {
-	tests := []struct {
-		name string
-		got  string
-		want string
-	}{
-		{name: "flag empty", got: flag("-n", ""), want: ""},
-		{name: "flag value", got: flag("-n", "default"), want: "-n default"},
-		{name: "bool flag true", got: boolFlag("--verbose", true), want: "--verbose"},
-		{name: "bool flag false", got: boolFlag("--verbose", false), want: ""},
-		{name: "repeat flag empty", got: repeatFlag("-e", ""), want: ""},
-		{name: "repeat flag one value", got: repeatFlag("-e", "TEST=TEST"), want: "-e TEST=TEST"},
-		{name: "repeat flag two values", got: repeatFlag("-e", "TEST=TEST FOO=BAR"), want: "-e TEST=TEST -e FOO=BAR"},
-		{name: "repeat flag quotes unsafe values", got: repeatFlag("--label", "name=hello;world env=prod"), want: "--label 'name=hello;world' --label env=prod"},
-		{name: "default empty", got: defaultValue("", "fallback"), want: "fallback"},
-		{name: "default value", got: defaultValue("actual", "fallback"), want: "actual"},
-		{name: "join skips empty", got: joinNonEmpty([]string{"kubectl", "", "pods"}, " "), want: "kubectl pods"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.got != tt.want {
-				t.Fatalf("got %q, want %q", tt.got, tt.want)
-			}
-		})
-	}
-}
-
-func TestEmptyHelper(t *testing.T) {
-	if !empty("") {
-		t.Fatal("empty string should be empty")
-	}
-	if empty("value") {
-		t.Fatal("non-empty string should not be empty")
-	}
-}
-
-func TestQuoteShellEscapesSensitiveValues(t *testing.T) {
-	tests := []struct {
-		name  string
-		value string
-		want  string
-	}{
-		{name: "whitespace", value: "hello world", want: "'hello world'"},
-		{name: "dollar", value: "cost $5", want: "'cost $5'"},
-		{name: "backticks", value: "run `date`", want: "'run `date`'"},
-		{name: "single quote", value: "don't", want: "'don'\\''t'"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := quote(tt.value); got != tt.want {
-				t.Fatalf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestFlagQuotesUnsafeValues(t *testing.T) {
-	got := flag("--name", "prod; rm -rf /")
-	if got == "--name prod; rm -rf /" {
-		t.Fatal("flag should quote unsafe shell values")
-	}
-	if got != "--name 'prod; rm -rf /'" {
-		t.Fatalf("got %q, want shell-quoted value", got)
-	}
-}
-
-func TestEvalBool(t *testing.T) {
-	ctx := map[string]string{"mode": "advanced", "output": "json"}
-	got, err := EvalBool(`mode == "advanced" && output in ["json", "yaml"]`, ctx)
+func TestAdvancedHelpersAreTypedAndPure(t *testing.T) {
+	s := models.Snippet{Name: "Forward service", Command: "{{resource}} {{ports}}", Inputs: []models.Input{{Name: "service"}, {Name: "host", Default: "8080"}, {Name: "target"}}, Expressions: map[string]string{"resource": `quote("svc/" + inputs.service)`, "ports": `quote(inputs.host + ":" + default(inputs.target, inputs.host))`}}
+	c, err := Compile(s)
 	if err != nil {
-		t.Fatalf("EvalBool returned error: %v", err)
+		t.Fatal(err)
 	}
-	if !got {
-		t.Fatal("expected expression to evaluate true")
+	got, err := c.Render(map[string]any{"service": "api"})
+	if err != nil || got != "'svc/api' '8080:8080'" {
+		t.Fatalf("%q %v", got, err)
+	}
+	for _, code := range []string{`env("HOME")`, `len(inputs.service)`, `[1,2,3][0]`, `inputs.service + "x" + "y" + 3`, strings.Repeat(" ", 4097)} {
+		bad := s
+		bad.Expressions = map[string]string{"resource": code, "ports": `"ok"`}
+		if _, err := Compile(bad); err == nil {
+			t.Fatalf("unsupported expression accepted: %s", code)
+		}
 	}
 }
 
-func TestInterpolate(t *testing.T) {
-	ctx := map[string]string{"pattern": "hello world", "file": "app.log"}
-	got, err := Interpolate(`grep ${quote(pattern)} ${file}`, ctx)
+func TestExpressionsEnforceInputAndHelperTypes(t *testing.T) {
+	inputs := []models.Input{{Name: "text"}, {Name: "enabled", Kind: "toggle", Flag: "-x"}, {Name: "items", Kind: "repeat", Flag: "-e"}}
+	for _, source := range []string{`quote(inputs.enabled)`, `inputs.enabled + "x"`, `inputs.text == inputs.enabled`, `empty(inputs.text) ? "x" : true`, `join([true], ",")`, `flag("-x", inputs.items)`} {
+		if _, err := Compile(models.Snippet{Name: "Typed", Command: "{{out}}", Inputs: inputs, Expressions: map[string]string{"out": source}}); err == nil {
+			t.Fatalf("untyped expression accepted: %s", source)
+		}
+	}
+	c, err := Compile(models.Snippet{Name: "Helpers", Command: "{{out}}", Inputs: inputs, Expressions: map[string]string{"out": `join([flag("-n", inputs.text), boolFlag("-x", inputs.enabled)], " ")`}})
 	if err != nil {
-		t.Fatalf("Interpolate returned error: %v", err)
+		t.Fatal(err)
 	}
-	want := `grep 'hello world' app.log`
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	got, err := c.Render(map[string]any{"text": "team-a", "enabled": true})
+	if err != nil || got != "-n team-a -x" {
+		t.Fatalf("helper composition %q: %v", got, err)
 	}
 }
 
-func TestInterpolateBraceInsideQuotedExpression(t *testing.T) {
-	ctx := map[string]string{"pattern": ""}
-	got, err := Interpolate(`x ${default(pattern, "}")} y`, ctx)
+func TestConditionsUseEffectiveValuesInDependencyOrder(t *testing.T) {
+	s := models.Snippet{Name: "Dependency", Command: "echo {{child}} {{dependent}}", Inputs: []models.Input{
+		{Name: "dependent", Default: "visible", VisibleWhen: &models.Condition{Expr: `inputs.child != ""`}},
+		{Name: "child", Default: "secret", VisibleWhen: &models.Condition{Input: "mode", Equals: "show"}},
+		{Name: "mode", Default: "hide"},
+	}}
+	c, err := Compile(s)
 	if err != nil {
-		t.Fatalf("Interpolate returned error: %v", err)
+		t.Fatal(err)
 	}
-	want := `x } y`
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	result := c.Preview(nil)
+	if !result.Valid() || result.Visible["dependent"] || result.Command != "echo  " {
+		t.Fatalf("hidden dependency: %+v", result)
 	}
-}
-
-func TestInterpolateUnknownValue(t *testing.T) {
-	_, err := Interpolate(`kubectl get pods ${namespace_arg}`, map[string]string{})
-	if err == nil {
-		t.Fatal("expected unknown value error")
+	result = c.Preview(map[string]any{"mode": "show"})
+	if !result.Valid() || !result.Visible["dependent"] || result.Command != "echo secret visible" {
+		t.Fatalf("visible dependency: %+v", result)
 	}
 }
 
-func TestNormalizeWhitespace(t *testing.T) {
-	tests := []struct {
-		name    string
-		command string
-		want    string
-	}{
-		{name: "plain", command: "docker run  nginx   --rm", want: "docker run nginx --rm"},
-		{name: "single quotes", command: "printf 'a  b'  |  cat", want: "printf 'a  b' | cat"},
-		{name: "double quotes", command: `echo "a  b"   done`, want: `echo "a  b" done`},
-		{name: "escaped space", command: `echo a\ b   done`, want: `echo a\ b done`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := NormalizeCommandWhitespace(tt.command)
-			if got != tt.want {
-				t.Fatalf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestResolveComputedValue(t *testing.T) {
-	computed := map[string]ComputedValue{
-		"output_arg": {Value: `flag("-o", output)`},
-	}
-	values := map[string]string{"output": "json"}
-	got, err := ResolveComputed(computed, values)
+func TestPresetsKeepTypedValuesAndItemBoundaries(t *testing.T) {
+	s := models.Snippet{Inputs: []models.Input{{Name: "env", Kind: "repeat"}, {Name: "enabled", Kind: "toggle"}, {Name: "text"}}}
+	got, err := Presets(s, []string{"env=A=1", "env=B=hello world", "enabled=TRUE", "text="})
 	if err != nil {
-		t.Fatalf("ResolveComputed returned error: %v", err)
+		t.Fatal(err)
 	}
-	if got["output_arg"] != "-o json" {
-		t.Fatalf("got %q, want %q", got["output_arg"], "-o json")
+	if got["enabled"] != true || got["text"] != "" || strings.Join(got["env"].([]string), "|") != "A=1|B=hello world" {
+		t.Fatalf("presets %+v", got)
 	}
-}
-
-func TestResolveComputedValueRequiresExpression(t *testing.T) {
-	computed := map[string]ComputedValue{
-		"namespace_arg": {Value: "-A"},
-	}
-	_, err := ResolveComputed(computed, nil)
-	if err == nil {
-		t.Fatal("expected unquoted literal expression error")
-	}
-	if !strings.Contains(err.Error(), "computed namespace_arg value") {
-		t.Fatalf("error %q should identify computed value", err)
-	}
-}
-
-func TestResolveComputedSortedDependencies(t *testing.T) {
-	computed := map[string]ComputedValue{
-		"b_arg": {Value: `flag("--b", a_arg)`},
-		"a_arg": {Value: `"alpha"`},
-	}
-	got, err := ResolveComputed(computed, nil)
-	if err != nil {
-		t.Fatalf("ResolveComputed returned error: %v", err)
-	}
-	if got["b_arg"] != "--b alpha" {
-		t.Fatalf("got %q, want %q", got["b_arg"], "--b alpha")
-	}
-}
-
-func TestResolveComputedLaterDependencyErrors(t *testing.T) {
-	computed := map[string]ComputedValue{
-		"a_arg": {Value: `flag("--a", b_arg)`},
-		"b_arg": {Value: `"beta"`},
-	}
-	_, err := ResolveComputed(computed, nil)
-	if err == nil {
-		t.Fatal("expected later dependency error")
-	}
-	if !strings.Contains(err.Error(), "computed a_arg value") || !strings.Contains(err.Error(), "b_arg") {
-		t.Fatalf("error %q should identify computed value and unavailable dependency", err)
-	}
-}
-
-func TestResolveComputedCases(t *testing.T) {
-	computed := map[string]ComputedValue{
-		"namespace_arg": {
-			Cases: []ComputedCase{
-				{When: `namespace_mode == "all"`, Value: "-A"},
-				{When: `namespace_mode == "named"`, Value: `${flag("-n", namespace)}`},
-				{Default: true, Value: ""},
-			},
-		},
-	}
-	values := map[string]string{"namespace_mode": "named", "namespace": "default"}
-	got, err := ResolveComputed(computed, values)
-	if err != nil {
-		t.Fatalf("ResolveComputed returned error: %v", err)
-	}
-	if got["namespace_arg"] != "-n default" {
-		t.Fatalf("got %q, want %q", got["namespace_arg"], "-n default")
-	}
-}
-
-func TestResolveComputedDefaultCase(t *testing.T) {
-	computed := map[string]ComputedValue{
-		"namespace_arg": {
-			Cases: []ComputedCase{
-				{When: `namespace_mode == "all"`, Value: "-A"},
-				{Default: true, Value: `${flag("-n", namespace)}`},
-			},
-		},
-	}
-	values := map[string]string{"namespace_mode": "named", "namespace": "default"}
-	got, err := ResolveComputed(computed, values)
-	if err != nil {
-		t.Fatalf("ResolveComputed returned error: %v", err)
-	}
-	if got["namespace_arg"] != "-n default" {
-		t.Fatalf("got %q, want %q", got["namespace_arg"], "-n default")
-	}
-}
-
-func TestResolveComputedCaseNonBoolWhen(t *testing.T) {
-	computed := map[string]ComputedValue{
-		"namespace_arg": {
-			Cases: []ComputedCase{{When: `namespace_mode`, Value: "-A"}},
-		},
-	}
-	values := map[string]string{"namespace_mode": "named"}
-	_, err := ResolveComputed(computed, values)
-	if err == nil {
-		t.Fatal("expected non-bool when error")
-	}
-	if !strings.Contains(err.Error(), "computed namespace_arg case 0") || !strings.Contains(err.Error(), "boolean") {
-		t.Fatalf("error %q should identify computed value, case index, and boolean requirement", err)
+	for _, args := range [][]string{{"text=x", "text=y"}, {"enabled=yes"}, {"unknown=x"}, {"missing separator"}} {
+		if _, err := Presets(s, args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
 	}
 }
