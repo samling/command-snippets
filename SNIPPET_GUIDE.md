@@ -1,865 +1,132 @@
-# Snippet Creation Guide
+# Creating commands in CS
 
-This guide provides comprehensive documentation for creating command snippets in CS (Command Snippets). Learn how to build powerful, reusable command templates with intelligent variable substitution, computed values, and validation.
-
-## Table of Contents
-
-- [Quick Start](#quick-start)
-- [Snippet Structure](#snippet-structure)
-- [Variables](#variables)
-  - [Variable Fields](#variable-fields)
-  - [Variable Types](#variable-types)
-  - [Validation](#validation)
-  - [Default Values](#default-values)
-- [Friendlier Template Syntax](#friendlier-template-syntax)
-- [Expert Transform Rules](#expert-transform-rules)
-- [Variable Types (Reusable Definitions)](#variable-types-reusable-definitions)
-- [Advanced Examples](#advanced-examples)
-- [Best Practices](#best-practices)
-
-## Quick Start
-
-The simplest snippet consists of a command template with variables:
+Use `cs add` for guided authoring, or edit YAML directly. A snippet needs only a friendly `name` and literal `command`:
 
 ```yaml
 snippets:
-  hello-world:
-    name: "hello-world"
-    description: "Say hello to someone"
-    command: "echo 'Hello, <name>!'"
-    variables:
-      - name: "name"
-        description: "Name to greet"
-        required: true
-    tags: ["example", "simple"]
+  - name: Git status
+    tags: [Git]
+    command: git status --short
 ```
 
-## Snippet Structure
+Snippet fields are `id`, `name`, `description`, `tags`, `command`, `inputs` and `expressions`. IDs are optional lowercase UUID v4 values. Do not copy an existing ID to a different command. Reading never assigns IDs; an explicit save assigns one to an ID-less entry. Tags define categories; there is no group or slug field.
 
-Every snippet consists of these top-level fields:
+## Guided authoring
 
-### Required Fields
+The framed workspace contains the title, multiline command, description and one Tags field, with input configuration beside it (stacked at narrower sizes). Tab/Shift-Tab traverses controls; Left/Right changes selections. Type or paste `ls -lah {{folder_name}}`: a complete valid token creates a required text input once, in first-occurrence order. Repeated placeholders reuse it; existing definitions and expressions keep their names, types and settings. Partial or invalid tokens remain editable and produce compile feedback. Removing a token does not delete its definition; use the inline Remove action deliberately. Input outputs already include any required shell quoting.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Display name for the snippet (usually same as the YAML key) |
-| `description` | string | Human-readable description of what the command does |
-| `command` | string | The command template with `<variable>` placeholders; `${...}` interpolation is enabled when the snippet has top-level `computed` values |
+Tags split on Unicode whitespace and deduplicate using the library's case-folded identity, retaining first spelling/order. Existing multiword tags stay intact while the field is untouched; its help warns that editing splits on whitespace. Saved tags remain a YAML sequence. The read-only Saved to label shows the configured default source for a new command and the owning source for an edit.
 
-### Optional Fields
+The selected input's inline controls contain labels/help, behavior, defaults, requiredness, flags, choice label/output rows, special value/output rows, validation and visibility/required conditions. Expressions and Test preview are discoverable inline actions; no Ctrl-N/Ctrl-P is needed for normal authoring. Test uses the same live preview and controls as command use and never emits or executes a command. Missing required test values are reported as an incomplete representative test; the reusable definition can still be saved, but cannot be inserted until its visible inputs validate.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `variables` | array | List of variable definitions (see [Variables](#variables)) |
-| `computed` | object | Top-level computed values for `${...}` interpolation |
-| `tags` | array | Tags for organizing and searching snippets |
-
-### Example: Complete Snippet Structure
+## Declarative inputs
 
 ```yaml
 snippets:
-  kubectl-get-pods:
-    name: "kubectl-get-pods"
-    description: "Get Kubernetes pods with namespace selection"
-    command: "kubectl get pods ${namespace_arg}"
-    variables:
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: 'namespace_mode == "named"'
-        required_if: 'namespace_mode == "named"'
-    computed:
-      namespace_arg:
-        cases:
-          - when: 'namespace_mode == "all"'
-            value: "-A"
-          - when: 'namespace_mode == "named"'
-            value: '${flag("-n", namespace)}'
-          - default: true
-    tags: ["kubernetes", "pods", "kubectl"]
+  - name: Run a container with options
+    tags: [Docker]
+    command: docker run {{detach}} {{env}} {{name}} {{image}}
+    inputs:
+      - {name: detach, kind: toggle, flag: -d, default: false}
+      - name: env
+        kind: repeat
+        flag: -e
+        default: []
+        validate: {pattern: '^[A-Za-z_][A-Za-z0-9_]*=.*$'}
+      - {name: name, kind: flag, flag: --name}
+      - {name: image, required: true, default: 'nginx:latest'}
 ```
 
-## Variables
+| Kind | Raw value | Output |
+| --- | --- | --- |
+| `text` (default) | String | One argument, quoted if needed; empty omits |
+| `flag` | String | Literal flag plus quoted value; empty omits |
+| `toggle` | Boolean | Literal flag when true, nothing when false |
+| `choice` | Choice label | Selected literal output fragment |
+| `repeat` | String list | One flag and independently quoted value per item |
 
-Variables are placeholders in your command template denoted by `<variable_name>`. Each variable used in the command **must** be explicitly defined in the `variables` array.
+Flag, toggle and repeat require `flag`. Choice requires ordered `choices: [{label: CPU, value: "3"}, {label: Memory, value: "4"}]`; omitted default selects the first label. Invalid explicit labels are errors, not silently replaced. `special: {all: -A, "": ""}` maps exact raw strings to literal fragments before normal output for text, flag and choice. Hidden inputs bypass special mappings.
 
-### Variable Fields
+Every input supports `name`, `label`, `help`, `kind`, `default`, `required`, `flag`, `choices`, `special`, `validate`, `visible_when` and `required_when` where applicable. Names match `[A-Za-z_][A-Za-z0-9_]*` and cannot collide with another input or expression. Omitted defaults are empty text/list, false toggle, or the first choice. An explicit empty preset does not restore a default.
 
-#### Required Field
+Defaults must have the input's type. Quote numeric text: `default: "8080"`, not `default: 8080`. YAML booleans must be booleans, not strings. Validation can combine `pattern` (Go RE2), inclusive integer `range: [1, 65535]`, and `regex: true` (the entered value must compile as RE2). Optional empty values skip content checks. Required repeat needs at least one item; required toggle needs true. Toggle inputs reject pattern/range/regex content validation; use requiredness and conditions instead. Choice labels remain required/valid even when their output is empty.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Variable name (must match the placeholder in the command) |
+Repeated CLI presets keep item boundaries:
 
-#### Optional Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `description` | string | Help text shown to user during input |
-| `required` | boolean | If true, user must provide a value (default: false) |
-| `default` | string | Default value if user provides no input |
-| `type` | string | Variable type (see [Variable Types](#variable-types)) |
-| `choices` | array | Selectable values; also validates input like an enum |
-| `empty_label` | string | Display label for an empty string choice; defaults to `none` |
-| `visible_if` | string | Expression that decides when a variable is shown and used |
-| `required_if` | string | Expression that makes a visible variable required |
-| `validation` | object | Validation rules (see [Validation](#validation)) |
-| `transform` | object | Expert variable-level transform rules (see [Expert Transform Rules](#expert-transform-rules)) |
-| `transform_template` | string | Reference to a reusable expert transform template |
-| `computed` | boolean | Expert variable-level computed value (default: false) |
-
-### Variable Types
-
-The `type` field can be:
-
-#### Built-in Types
-- `string` (default): Any text input
-- `boolean`: True/false value (shown as `<true>` / `<false>` selector)
-- `regex`: Regular expression pattern (validated on input)
-
-#### Custom Types
-You can define custom types in the `variable_types` section (see [Variable Types (Reusable Definitions)](#variable-types-reusable-definitions)):
-- `port`: Network port (1-65535)
-- `namespace`: Kubernetes namespace
-- Any custom type you define
-
-### Validation
-
-Validation ensures user input meets specific criteria:
-
-#### Pattern Validation
-
-Use regular expressions to validate input format:
-
-```yaml
-variables:
-  - name: "email"
-    description: "Email address"
-    validation:
-      pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+```sh
+cs render 'Run a container with options' --set env=A=1 --set 'env=B=hello world'
 ```
 
-#### Enum Validation
+The first `=` separates name and value. Scalar, toggle and choice names cannot be supplied twice; repeat names append items. Unknown names and expression presets fail.
 
-Restrict input to a specific set of values:
-
-```yaml
-variables:
-  - name: "log_level"
-    description: "Logging level"
-    validation:
-      enum: ["debug", "info", "warn", "error"]
-```
-
-Users will see a selector with arrow keys to choose from the options.
-
-#### Range Validation
-
-For numeric inputs, specify min and max values:
-
-```yaml
-variables:
-  - name: "port"
-    description: "Port number"
-    type: "port"
-    validation:
-      range: [1, 65535]
-```
-
-### Default Values
-
-Provide sensible defaults to speed up command entry:
-
-```yaml
-variables:
-  - name: "branch"
-    description: "Git branch"
-    default: "main"
-  - name: "remote"
-    description: "Git remote"
-    default: "origin"
-```
-
-If a user presses Enter without typing, the default value is used.
-
-## Friendlier Template Syntax
-
-Use `${...}` interpolation for readable command templates with top-level `computed` values. Command interpolation currently runs only when the snippet has a top-level `computed` block; snippets without `computed` preserve shell-style `${...}` text for compatibility.
-
-Interpolation accepts variable names or expressions:
+## Conditions
 
 ```yaml
 snippets:
-  kubectl-get-pods:
-    name: "kubectl-get-pods"
-    description: "Get pods with namespace and output options"
-    command: "kubectl get pods ${namespace_arg} ${output_arg}"
-    variables:
-      - name: "namespace_mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        default: "default"
-        visible_if: 'namespace_mode == "named"'
-        required_if: 'namespace_mode == "named"'
-      - name: "output"
-        choices: ["", "wide", "yaml", "json"]
-    computed:
-      namespace_arg:
-        cases:
-          - when: 'namespace_mode == "all"'
-            value: "-A"
-          - when: 'namespace_mode == "named"'
-            value: '${flag("-n", namespace)}'
-          - default: true
-            value: ""
-      output_arg:
-        value: 'flag("-o", output)'
+  - name: Get pods in a chosen namespace
+    command: kubectl get pods {{mode}} {{namespace}}
+    inputs:
+      - name: mode
+        kind: choice
+        choices:
+          - {label: Default, value: ""}
+          - {label: All, value: -A}
+          - {label: Named, value: ""}
+      - name: namespace
+        kind: flag
+        flag: -n
+        visible_when: {input: mode, equals: Named}
+        required_when: {input: mode, equals: Named}
 ```
 
-`${namespace_arg}` inserts a computed value, while `${flag("-n", namespace)}` evaluates an expression inline. Extra spaces from empty interpolations are normalized for commands using the new syntax.
+A condition uses exactly one of `{input, equals}`, `{input, not_equals}` or `{expr}`. Comparisons use the controller's raw value and type, not its emitted shell fragment. Dependencies may refer to later inputs; unknown names, self-dependencies and cycles fail validation. Hidden values are cached for restoration, but downstream conditions and expressions see typed zero values. Hidden inputs emit nothing and skip required/content validation.
 
-When `computed` is present, every `${...}` sequence in the command is treated as template interpolation. Avoid shell parameter expansions such as `${HOME}` or `${FOO:-bar}` in commands with top-level `computed`; write shell variable references without braces when possible, such as `$HOME`, or omit top-level `computed` for legacy shell-expansion snippets. Without top-level `computed`, legacy shell `${...}` sequences are preserved unchanged.
+## Literal command text and expressions
 
-### Choices
+Only `{{input_name}}` and `{{expression_name}}` interpolate. Write `{{{{` to emit a literal `{{`; a stray closing `}}` is literal. `${HOME}`, `${x:-fallback}`, `$0`, pipes, braces, heredocs and newlines remain shell text. Inserted values are never scanned again. Placeholders producing complete shell arguments belong outside existing shell quotes.
 
-Use `choices` for simple selectors:
-
-```yaml
-variables:
-  - name: "output"
-    choices: ["", "wide", "yaml", "json"]
-```
-
-Choices also validate input, similar to `validation.enum`.
-
-Use an empty string choice when selecting no option should omit a flag. The form displays that choice as `none` by default while keeping the underlying value empty. Set `empty_label` when another label is clearer:
-
-```yaml
-variables:
-  - name: "output"
-    choices: ["", "wide", "yaml", "json"]
-    empty_label: "default"
-computed:
-  output_arg:
-    value: 'flag("-o", output)'
-```
-
-### Conditional Visibility And Required Fields
-
-Use `visible_if` to show a variable only when an expression is true. Hidden variables are omitted from the rendered command, including their defaults.
-
-Use `required_if` when a variable is only required in some modes:
-
-```yaml
-variables:
-  - name: "namespace"
-    default: "default"
-    visible_if: 'namespace_mode == "named"'
-    required_if: 'namespace_mode == "named"'
-```
-
-### Top-Level Computed Values
-
-Top-level `computed` entries create reusable values for `${...}` interpolation.
-
-A simple `value` is an expression:
-
-```yaml
-computed:
-  output_arg:
-    value: 'flag("-o", output)'
-```
-
-`cases` choose the first matching `when`. A case `value` is interpolation text, so wrap helper calls in `${...}`:
-
-```yaml
-computed:
-  namespace_arg:
-    cases:
-      - when: 'namespace_mode == "all"'
-        value: "-A"
-      - when: 'namespace_mode == "named"'
-        value: '${flag("-n", namespace)}'
-      - default: true
-        value: ""
-```
-
-### Expression Helpers
-
-These helpers are available in `${...}`, computed `value`, computed case expressions, `visible_if`, and `required_if` where expressions are evaluated:
-
-| Helper | Example | Result |
-|--------|---------|--------|
-| `flag(name, value)` | `flag("-o", output)` | `-o json` when `output` is `json`, otherwise empty |
-| `boolFlag(name, enabled)` | `boolFlag("--verbose", verbose)` | `--verbose` when truthy, otherwise empty |
-| `repeatFlag(name, values)` | `repeatFlag("-e", env_var)` | `-e A=1 -e B=2` when `env_var` is `A=1 B=2` |
-| `quote(value)` | `quote("hello world")` | `'hello world'` |
-| `join(values, sep)` | `join([namespace_arg, output_arg], " ")` | non-empty values joined with a separator |
-| `default(value, fallback)` | `default(output, "wide")` | fallback when value is empty |
-| `empty(value)` | `empty(output)` | true when value is empty or whitespace |
-
-`flag` and `repeatFlag` shell-quote unsafe values automatically. For example, `flag("--name", "hello world")` renders `--name 'hello world'`. `repeatFlag` splits values on whitespace, so values containing spaces are not supported.
-
-### Advanced Compatibility
-
-Variable-level transform rules still work for expert snippets and compatibility. Prefer `${...}` interpolation with top-level `computed` for new snippets unless you specifically need reusable Go-template transforms.
-
-- `<name>` command placeholders.
-- Variable-level `transform` rules such as `empty_value`, `value_pattern`, `true_value`, and `false_value`.
-- Reusable `transform_template` definitions for shared Go-template transforms.
-- Go-template `compose` for variable-level computed values.
-
-## Expert Transform Rules
-
-For new snippets, prefer [Friendlier Template Syntax](#friendlier-template-syntax): `${...}` interpolation, expression helpers such as `flag` and `boolFlag`, and top-level `computed` values. Variable-level transforms are still useful when you need Go-template formatting or a shared transform template across many existing snippets.
-
-Inline transforms modify a single `<name>` placeholder:
+For a larger assembled argument, use one named expression:
 
 ```yaml
 snippets:
-  kubectl-logs:
-    command: "kubectl logs <pod_name> <follow>"
-    variables:
-      - name: "pod_name"
-        required: true
-      - name: "follow"
-        type: "boolean"
-        transform:
-          true_value: "-f"
-          false_value: ""
+  - name: Forward a service port
+    command: kubectl port-forward {{resource}} {{ports}}
+    inputs:
+      - {name: service, required: true}
+      - {name: host_port, required: true, default: "8080", validate: {range: [1, 65535]}}
+      - {name: target_port, validate: {range: [1, 65535]}}
+    expressions:
+      resource: 'quote("svc/" + inputs.service)'
+      ports: 'quote(inputs.host_port + ":" + default(inputs.target_port, inputs.host_port))'
 ```
 
-`value_pattern` supports Go templates with `{{.Value}}`:
+Expressions use typed `inputs.name`, string/boolean literals, string/boolean operators, ternary selection, and pure helpers:
+
+- `quote(text)` always shell-quotes a complete argument.
+- `flag(option, text)` omits empty text, otherwise quotes its value.
+- `boolFlag(option, enabled)` emits when enabled is true.
+- `repeatFlag(option, items)` preserves each string-list item.
+- `join(items, separator)` joins nonempty strings.
+- `default(text, fallback)` chooses fallback only for empty text.
+- `empty(value)` checks a string, boolean or string list for its typed zero.
+
+Named expressions return strings; expression conditions return booleans. They have no environment, filesystem, process, network or clock access. Methods, ranges, comprehensions and collection iteration are rejected. Limits are 4 KiB and 1,000 nodes per expression, and 1 MiB per rendered command. Literal command bytes outside placeholders are not normalized.
+
+## Sources and supported YAML
 
 ```yaml
-variables:
-  - name: "port"
-    transform:
-      empty_value: ""
-      value_pattern: "-p {{.Value}}:{{.Value}}"
-```
-
-Reusable transform templates live at the config root and are referenced with `transform_template`:
-
-```yaml
-transform_templates:
-  docker-port:
-    description: "Docker port mapping"
-    transform:
-      empty_value: ""
-      value_pattern: "-p {{.Value}}:{{.Value}}"
-
-snippets:
-  docker-run:
-    command: "docker run <port> <image>"
-    variables:
-      - name: "port"
-        transform_template: "docker-port"
-      - name: "image"
-        required: true
-```
-
-Variable-level computed values use Go-template `compose` and do not prompt the user:
-
-```yaml
-variables:
-  - name: "resource_type"
-    choices: ["pod", "svc", "deployment"]
-  - name: "resource_name"
-    required: true
-  - name: "resource"
-    computed: true
-    transform:
-      compose: "{{.resource_type}}/{{.resource_name}}"
-```
-
-## Variable Types (Reusable Definitions)
-
-Define reusable variable configurations in the `variable_types` section. These can specify default validation rules, defaults, and transformations.
-
-### Defining Variable Types
-
-```yaml
-variable_types:
-  port:
-    description: "Network port number"
-    validation:
-      range: [1, 65535]
-    default: "8080"
-  
-  namespace:
-    description: "Kubernetes namespace"
-    default: "default"
-  
-  email:
-    description: "Email address"
-    validation:
-      pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
-```
-
-### Using Variable Types
-
-```yaml
-variables:
-  - name: "http_port"
-    description: "HTTP port"
-    type: "port"  # Inherits validation and default from type definition
-  
-  - name: "https_port"
-    description: "HTTPS port"
-    type: "port"
-    default: "443"  # Override the type's default
-  
-  - name: "kube_namespace"
-    description: "Kubernetes namespace"
-    type: "namespace"
-```
-
-**Benefits:**
-- Consistent validation across commands
-- Reduce duplication
-- Easier to update validation rules globally
-
-## Advanced Examples
-
-### Example 1: Git Branch with Remote
-
-Create a snippet that constructs a full branch reference:
-
-```yaml
-snippets:
-  git-checkout-remote:
-    name: "git-checkout-remote"
-    description: "Checkout remote branch"
-    command: "git checkout ${branch_ref}"
-    variables:
-      - name: "remote"
-        description: "Remote name"
-        default: "origin"
-      - name: "branch"
-        description: "Branch name"
-        required: true
-    computed:
-      branch_ref:
-        value: 'remote + "/" + branch'
-    tags: ["git", "branch"]
-```
-
-### Example 2: Docker Run with Optional Flags
-
-Handle multiple optional Docker flags elegantly:
-
-```yaml
-snippets:
-  docker-run-advanced:
-    name: "docker-run-advanced"
-    description: "Run Docker container with optional flags"
-    command: "docker run ${detach_arg} ${port_arg} ${volume_arg} ${name_arg} ${image_arg}"
-    variables:
-      - name: "detach"
-        description: "Run in detached mode"
-        type: "boolean"
-        default: "false"
-      - name: "port"
-        description: "Port mapping (empty for none)"
-      - name: "volume"
-        description: "Volume mount (empty for none)"
-      - name: "container_name"
-        description: "Container name (empty for auto)"
-      - name: "image"
-        description: "Docker image"
-        required: true
-    computed:
-      detach_arg:
-        value: 'boolFlag("-d", detach)'
-      port_arg:
-        value: 'empty(port) ? "" : "-p " + quote(port + ":" + port)'
-      volume_arg:
-        value: 'flag("-v", volume)'
-      name_arg:
-        value: 'flag("--name", container_name)'
-      image_arg:
-        value: "image"
-    tags: ["docker", "container"]
-```
-
-**Usage:**
-```bash
-detach: <true>
-port: 8080
-volume: [Enter]
-container_name: my-app
-image: nginx:latest
-# Result: docker run -d -p 8080:8080 --name my-app nginx:latest
-```
-
-### Example 3: File Backup with Boolean Option
-
-Create a snippet that optionally adds a backup extension:
-
-```yaml
-snippets:
-  sed-edit-file:
-    name: "sed-edit-file"
-    description: "Edit file with sed"
-    command: "sed -i${backup_suffix} ${script_arg} ${file_arg}"
-    variables:
-      - name: "backup"
-        description: "Create file backup"
-        type: "boolean"
-        default: "false"
-      - name: "search"
-        description: "Text to search for"
-        required: true
-      - name: "replace"
-        description: "Replacement text"
-        required: true
-      - name: "file"
-        description: "File to edit"
-        required: true
-    computed:
-      backup_suffix:
-        value: 'backup == "true" ? ".bak" : ""'
-      script_arg:
-        value: 'quote("s/" + search + "/" + replace + "/g")'
-      file_arg:
-        value: "file"
-    tags: ["sed", "edit", "file"]
-```
-
-**Usage:**
-```bash
-backup: <true>
-# Result: sed -i.bak 's/foo/bar/g' file.txt
-
-backup: <false>
-# Result: sed -i 's/foo/bar/g' file.txt
-```
-
-### Example 4: Complex Kubernetes Port Forward
-
-Combine multiple computed variables:
-
-```yaml
-snippets:
-  kubectl-port-forward:
-    name: "kubectl-port-forward"
-    description: "Forward local port to pod or service"
-    command: "kubectl port-forward ${resource_arg} ${port_mapping_arg} ${namespace_arg}"
-    variables:
-      - name: "resource_type"
-        description: "Resource type"
-        required: true
-        default: "svc"
-        choices: ["pod", "svc"]
-      - name: "resource_name"
-        description: "Resource name"
-        required: true
-      - name: "host_port"
-        description: "Host port"
-        required: true
-        type: "port"
-      - name: "target_port"
-        description: "Target port (empty to use host port)"
-        default: ""
-        type: "port"
-      - name: "namespace_mode"
-        description: "Namespace mode"
-        choices: ["none", "all", "named"]
-        default: "none"
-      - name: "namespace"
-        description: "Namespace name"
-        visible_if: 'namespace_mode == "named"'
-        required_if: 'namespace_mode == "named"'
-    computed:
-      resource_arg:
-        value: 'resource_type + "/" + resource_name'
-      port_mapping_arg:
-        value: 'host_port + ":" + default(target_port, host_port)'
-      namespace_arg:
-        cases:
-          - when: 'namespace_mode == "all"'
-            value: "-A"
-          - when: 'namespace_mode == "named"'
-            value: '${flag("-n", namespace)}'
-          - default: true
-    tags: ["kubernetes", "port-forward", "networking"]
-```
-
-## Best Practices
-
-### 1. Use Descriptive Names
-
-Good variable names make snippets self-documenting:
-
-```yaml
-# Good
-variables:
-  - name: "source_file"
-  - name: "destination_dir"
-  - name: "create_backup"
-
-# Bad
-variables:
-  - name: "src"
-  - name: "dst"
-  - name: "bak"
-```
-
-### 2. Provide Helpful Descriptions
-
-Descriptions guide users during input:
-
-```yaml
-variables:
-  - name: "namespace"
-    description: "Kubernetes namespace (empty=none, 'all'=all namespaces, or specific name)"
-```
-
-### 3. Set Sensible Defaults
-
-Defaults speed up common use cases:
-
-```yaml
-variables:
-  - name: "branch"
-    default: "main"
-  - name: "remote"
-    default: "origin"
-  - name: "log_level"
-    default: "info"
-```
-
-### 4. Use Helpers for Optional Flags
-
-Prefer expression helpers over hand-built flag strings:
-
-```yaml
-# Good: concise optional flag logic
-variables:
-  - name: "output"
-    choices: ["", "wide", "yaml", "json"]
-computed:
-  output_arg:
-    value: 'flag("-o", output)'
-
-# Bad: ask users to type complete flags
-variables:
-  - name: "output_arg"
-    description: "Output flag, such as -o yaml"
-```
-
-### 5. Use Variable Types for Common Patterns
-
-Create types for frequently used validation:
-
-```yaml
-variable_types:
-  port:
-    validation:
-      range: [1, 65535]
-  email:
-    validation:
-      pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
-```
-
-### 6. Leverage Top-Level Computed Values
-
-Reduce user input by computing values:
-
-```yaml
-# User only enters: resource_type, resource_name
-# System computes: resource = "pod/my-pod"
-variables:
-  - name: "resource_type"
-    choices: ["pod", "svc"]
-  - name: "resource_name"
-    required: true
-computed:
-  resource_arg:
-    value: 'resource_type + "/" + resource_name'
-```
-
-### 7. Use Enums for Fixed Choices
-
-Provide a selector instead of free text:
-
-```yaml
-variables:
-  - name: "log_level"
-    validation:
-      enum: ["debug", "info", "warn", "error"]
-```
-
-### 8. Add Meaningful Tags
-
-Tags help organize and discover snippets:
-
-```yaml
-tags: ["kubernetes", "pods", "kubectl", "networking"]
-```
-
-### 9. Keep Commands Simple
-
-Break complex commands into multiple snippets:
-
-```yaml
-# Good: Focused snippets
-snippets:
-  docker-build:
-    command: "docker build -t <image>:<tag> ."
-  docker-push:
-    command: "docker push <image>:<tag>"
-
-# Bad: One giant snippet
-snippets:
-  docker-build-and-push:
-    command: "docker build -t <image>:<tag> . && docker push <image>:<tag>"
-```
-
-### 10. Test Your Snippets
-
-Use the interactive preview to ensure transformations work correctly:
-
-```bash
-cs exec your-snippet
-# Check the command preview at the top
-# Verify variables transform as expected
-```
-
-## Configuration Organization
-
-Run `cs init` to create the initial config file and copy the shipped snippet files into your config directory. The copied files are normal user configuration: edit them, delete commands you do not want, or split them further. CS does not silently restore deleted snippets on later runs.
-
-### Single File
-
-For small collections, keep everything in one file:
-
-```yaml
-# ~/.config/cs/config.yaml
-transform_templates:
-  # Your templates
-
-variable_types:
-  # Your types
-
-snippets:
-  # Your snippets
-
 settings:
-  # Your settings
+  sources: [snippets/*.yaml]
+  project_source: true
+  default_source: snippets/custom.yaml
+  color: auto
+snippets: []
 ```
 
-### Multiple Files
+Only the main file may contain settings. Relative source/destination paths resolve next to it; `~/` expands to the home directory. Includes load in declared order, glob matches in lexical order, and duplicate canonical paths load once. An empty glob warns; a missing literal path fails. Enabled project discovery reads only the current directory's `.csnippets`. Duplicate display names are allowed; duplicate persisted IDs are not.
 
-For larger collections, split by topic:
+Settings defaults are no includes, project discovery enabled, destination equal to the main file, `color: auto`, and the original `default` theme. Color can be `auto`, `always` or `never`; `--no-color` and nonempty `NO_COLOR` override it. Main settings also accept `theme: catppuccin-mocha` and optional semantic `theme_colors: {focus: '#cba6f7'}` overrides; see [Themes in README](README.md#themes) for every supported role. A new destination must be the main file, enabled `.csnippets`, or match a configured include. Changing the default destination does not create a file.
 
-```yaml
-# ~/.config/cs/config.yaml
-transform_templates:
-  # Shared templates
+Use a single document with a block root mapping and a block snippet sequence. Inline lists/maps within fields and literal/folded command scalars are supported. Anchors, aliases, custom tags, merge keys, duplicate keys, unknown fields and flow-style snippet entries fail closed. The old schema has no compatibility layer or automatic migration. A recovery screen lets you retry after external correction, or remove a broken include through settings when the main file is parseable.
 
-variable_types:
-  # Shared types
-
-settings:
-  additional_configs:
-    - "snippets/kubernetes.yaml"
-    - "snippets/docker.yaml"
-    - "snippets/git.yaml"
-```
-
-```yaml
-# ~/.config/cs/snippets/kubernetes.yaml
-snippets:
-  kubectl-get-pods:
-    # Kubernetes snippets
-```
-
-### Project-Specific Snippets
-
-Add `.csnippets` files in project directories:
-
-```yaml
-# .csnippets (in project root)
-snippets:
-  dev-build:
-    description: "Build this project"
-    command: "go build -o ./bin/<name> ."
-    variables:
-      - name: "name"
-        default: "myapp"
-```
-
-## Troubleshooting
-
-### Variable Not Found
-
-**Error:** `variable <name> not defined`
-
-**Solution:** Ensure every `<variable>` in the command has a matching entry in `variables`:
-
-```yaml
-command: "kubectl get pods <namespace>"
-variables:
-  - name: "namespace"  # Must match <namespace> in command
-```
-
-### Transform Template Not Found
-
-**Error:** `transform template 'xyz' not found`
-
-**Solution:** Check that the template is defined in `transform_templates`:
-
-```yaml
-transform_templates:
-  xyz:  # Must exist
-    transform:
-      # ...
-```
-
-### Validation Failing
-
-**Error:** `variable <name> does not match required format`
-
-**Solution:** Check your validation pattern and test with expected input:
-
-```yaml
-validation:
-  pattern: "^[a-z0-9-]+$"  # Only lowercase, numbers, hyphens
-```
-
-### Compose Template Errors
-
-**Error:** Template execution errors
-
-**Solution:** Use `{{- ... -}}` to control whitespace and test incrementally:
-
-```yaml
-compose: |
-  {{- .var1 -}}
-  {{- if .var2 -}}
-    /{{- .var2 -}}
-  {{- end -}}
-```
-
-## Further Reading
-
-- [README.md](README.md) - Main project documentation
-- [TESTING.md](TESTING.md) - Testing guidelines
-- [snippets/](snippets/) - Example snippet files for reference
-
-## Getting Help
-
-If you have questions or need help:
-
-1. Check example snippets in the `snippets/` directory
-2. Use `cs describe <snippet-id>` to inspect existing snippets
-3. Use `cs show transforms` and `cs show types` to see available building blocks
-4. Review the example files in this guide
-
-Happy snippet creation! 🚀
+Saves preserve unrelated source bytes and guard content/identity/permission conflicts. A failed save retains the editor draft. Included/project snippets never get flattened into the main file. Removing an include never deletes its file. See [README.md](README.md) for locks, durability warnings and the residual external-writer race.
