@@ -5,7 +5,9 @@ import (
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // Text edits rune positions, never byte offsets. Values remain literal; only
@@ -73,6 +75,8 @@ func (t *Text) Update(key tea.KeyMsg) bool {
 			end++
 		}
 		t.Value = append(t.Value[:t.Cursor], t.Value[end:]...)
+	case " ":
+		t.Insert([]rune{' '})
 	case "alt+enter":
 		if t.Multiline {
 			t.Insert([]rune{'\n'})
@@ -150,22 +154,52 @@ func Safe(value string) string {
 	return out.String()
 }
 func (t Text) OneLine(width int, focused bool) string {
+	return t.OneLineWithRenderer(width, focused, lipgloss.DefaultRenderer())
+}
+func (t Text) OneLineWithRenderer(width int, focused bool, r *lipgloss.Renderer) string {
 	if width <= 0 {
 		return ""
 	}
 	position := max(0, min(t.Cursor, len(t.Value)))
 	left := 0
 	if focused {
-		left = max(0, ansi.StringWidth(Safe(string(t.Value[:position])))-width+1)
+		cursorWidth := max(1, ansi.StringWidth(t.cursorGlyphWithRenderer(r)))
+		if cursorWidth > width {
+			return r.NewStyle().Reverse(true).Render(" ")
+		}
+		left = max(0, ansi.StringWidth(Safe(string(t.Value[:position])))-width+cursorWidth)
 	}
-	return ansi.Truncate(ansi.TruncateLeft(t.View(focused), left, ""), width, "")
+	return ansi.Truncate(ansi.TruncateLeft(t.view(focused, r), left, ""), width, "")
 }
-func (t Text) View(focused bool) string {
+func (t Text) View(focused bool) string { return t.view(focused, lipgloss.DefaultRenderer()) }
+func (t Text) view(focused bool, r *lipgloss.Renderer) string {
 	position := max(0, min(t.Cursor, len(t.Value)))
 	if !focused {
 		return Safe(t.String())
 	}
-	return Safe(string(t.Value[:position])) + "|" + Safe(string(t.Value[position:]))
+	left := Safe(string(t.Value[:position]))
+	if r.ColorProfile() == termenv.Ascii {
+		return left + "|" + Safe(string(t.Value[position:]))
+	}
+	end := position
+	if position < len(t.Value) && t.Value[position] != '\n' {
+		end++
+	}
+	return left + r.NewStyle().Reverse(true).Render(t.cursorGlyphWithRenderer(r)) + Safe(string(t.Value[end:]))
+}
+func (t Text) cursorGlyphWithRenderer(r *lipgloss.Renderer) string {
+	if r.ColorProfile() == termenv.Ascii {
+		return "|"
+	}
+	position := max(0, min(t.Cursor, len(t.Value)))
+	if position < len(t.Value) && t.Value[position] != '\n' {
+		glyph := Safe(string(t.Value[position]))
+		if ansi.StringWidth(glyph) == 0 {
+			return " " + glyph
+		}
+		return glyph
+	}
+	return " "
 }
 func Fit(value string, width, height, offset int) string {
 	if width <= 0 || height <= 0 {

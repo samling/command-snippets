@@ -19,15 +19,20 @@ import time
 BINARY = str(Path(sys.argv[1]).resolve())
 
 class Session:
-    def __init__(self, root, args=(), size=(120, 30)):
+    def __init__(self, root, args=(), size=(120, 30), color=False):
         self.master, slave = pty.openpty()
         self.started = time.monotonic()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", size[1], size[0], 0, 0))
         env = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "xdg"), TERM="xterm-256color", NO_COLOR="1", LANG="C.UTF-8")
+        if color:
+            env.pop("NO_COLOR", None)
+            env.pop("CLICOLOR", None)
+            env.pop("CLICOLOR_FORCE", None)
         def terminal():
             os.setsid()
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-        self.process = subprocess.Popen([BINARY, "--config", str(root / "config.yaml"), "--no-color", *args], cwd=root, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=slave, preexec_fn=terminal, pass_fds=(slave,))
+        color_args = [] if color else ["--no-color"]
+        self.process = subprocess.Popen([BINARY, "--config", str(root / "config.yaml"), *color_args, *args], cwd=root, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=slave, preexec_fn=terminal, pass_fds=(slave,))
         os.close(slave)
         self.screen = b""
     def read(self, timeout=.1):
@@ -92,53 +97,98 @@ def workload(root, count):
 
 
 def guided_pod(root):
+    """Author inferred, repeated inputs without Ctrl-N/P or a separate input page."""
     session = Session(root, ["add"])
     session.expect("Edit command")
     session.paste("Pod sorted, guided")
-    session.send(b"\t\t\t")
-    literal = "kubectl top pods namespace --no-headers | sort -k3,3 -h -r"
-    session.paste(literal)
-    def mark(command, start, end):
-        session.send(b"\x01" + b"\x1b[C" * start + b"\x10" + b"\x1b[C" * (end - start) + b"\x10")
-        session.expect("Mark input")
-    start = literal.index("namespace")
-    mark(literal, start, start + len("namespace"))
-    session.send(b"\x18")
-    session.paste("namespace")
-    session.send(b"\t\x1b[C\t")
-    session.paste("-n")
-    session.send(b"\t\r")
-    session.send(b"\t" * 6 + b" " + b"\t\r")
-    session.paste("all")
     session.send(b"\t")
+    session.paste("kubectl top pods {{namespace}} --no-headers | sort -k{{sort_by}},{{sort_by}} -h -r")
+    session.expect("+ Add input")
+    session.send(b"\t" * 3 + b"\r\r")  # Configure inputs focuses the list; open namespace
+    session.expect("Back to inputs")
+    session.send(b"\t" * 3 + b"\x1b[C\t")  # Name -> Shown as -> Description -> Type: flag, then Flag
+    session.paste("-n")
+    session.send(b"\t \t \t")  # Required off; Starting value on; Starts as
+    session.paste("all")
+    session.send(b"\t" * 4 + b"\r")  # Must match -> Number range -> Must be regex -> Advanced (open)
+    session.expect("Add substitution")
+    session.send(b"\t\r")  # + Add substitution focuses "When typed"
+    session.paste("all")
+    session.send(b"\t")  # Output instead
     session.paste("-A")
-    session.send(b"\x1b[1;5D" + b"\t" * 3)
-    command = literal.replace("namespace", "{{namespace}}", 1)
-    start = command.index("-k3") + 2
-    mark(command, start, start + 1)
-    session.send(b"\x18")
-    session.paste("sort_by")
-    session.send(b"\t" + b"\x1b[C" * 2 + b"\t\r")
-    session.send(b"\t" * 23 + b"\x18")
+    session.send(b"\x1b")  # back to the list on the namespace row
+    session.expect("flag -n")
+    session.send(b"\x1b[B\r")  # open sort_by
+    session.send(b"\t" * 3 + b"\x1b[C" * 3)  # Type: choice
+    session.send(b"\t\t\r")  # Required -> + Add choice; Enter focuses the new choice
     session.paste("CPU")
-    session.send(b"\t\x18")
-    session.paste("CPU")
-    session.send(b"\t\t\t\r")
+    session.send(b"\t")  # Outputs
+    session.paste("3")
+    session.send(b"\t\t\r")  # Remove choice -> + Add choice; Enter focuses the new choice
     session.paste("Memory")
     session.send(b"\t")
     session.paste("4")
-    session.send(b"\x1b[1;5D" + b"\t" * 3)
-    command = command.replace("-k3", "-k{{sort_by}}", 1)
-    start = command.index(",3") + 1
-    mark(command, start, start + 1)
-    session.send(b"\t\r")
     session.send(b"\x13")
-    session.expect("Saved to")
+    session.expect("Saved to ")
     session.send(b"\x1b")
     assert session.finish() == b""
     command = subprocess.check_output([BINARY, "--config", str(root / "config.yaml"), "render", "Pod sorted, guided", "--set", "namespace=all", "--set", "sort_by=Memory"], cwd=root, env=dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "xdg")))
     assert b"-A" in command and b"-k4,4" in command, command
     assert "expressions:" not in (root / "created.snippets.yaml").read_text()
+
+
+def theme_editor_flows(root):
+    root.mkdir()
+    (root / "config.yaml").write_text("settings:\n  sources: ['snippets/current/*.yaml']\n  default_source: snippets/current/custom.yaml\n  project_source: false\n  color: always\n  theme: catppuccin-mocha\n  theme_colors: {focus: '#123456'}\nsnippets: []\n")
+    initial = (root / "config.yaml").read_bytes()
+    for color in (False, True):
+        session = Session(root, color=color)
+        session.expect("CS — command library")
+        session.send(b"\x1bOQ")  # F2, safe under tmux pane bindings
+        session.expect("Edit command")
+        session.send(b"List")
+        session.send(b" ")  # a physical KeySpace, not bracketed paste
+        session.send(b"folder color" if color else b"folder")
+        session.send(b"\t")
+        for chunk in (b"ls", b" ", b"-lah", b" ", b"{{folder_name}}"):
+            session.send(chunk)
+        session.expect("folder_name")
+        session.expect("text · required")
+        session.send(b"\t\t")
+        session.send(b"\r")  # Enter opens the Tags checklist; arrows/Tab otherwise pass by
+        for chunk in (b"kubernetes", b" ", b"networking", b" ", b"Kubernetes"):
+            session.send(chunk)
+        if color:
+            assert b"38;2;18;52;86" in session.screen, "custom focus color not propagated"
+            assert b"48;2;30;30;46" in session.screen, "Mocha surface missing"
+        else:
+            assert b"\x1b[38;" not in session.screen, "no-color leaked palette ANSI"
+        session.send(b"\x1b")  # closes the checklist
+        session.send(b"\x1b")  # then, from the left pane, offers to discard
+        session.expect("Discard unsaved")
+        session.send(b"n")
+        session.send(b"\x13")
+        session.expect("Saved reusable definition")
+        session.send(b"\x03")
+        assert session.finish() == b"", "editor save/cancel emitted stdout"
+    source = root / "snippets/current/custom.yaml"
+    content = source.read_text()
+    assert content.count("name: List folder") == 2, "physical title space was lost"
+    assert content.count("command: ls -lah {{folder_name}}") == 2, "physical command spaces were lost"
+    assert content.count("name: folder_name") == 2 and content.count("required: true") == 2, "inference did not persist required inputs"
+    assert "networking" in content and content.count("kubernetes") == 2 and "Kubernetes" not in content, "tags were not split/deduplicated"
+    assert (root / "config.yaml").read_bytes() == initial, "authoring changed main settings"
+    # Editing retains ownership, regardless of the configured creation source.
+    session = Session(root, ["edit", "List folder"], color=True)
+    session.expect("Edit command")
+    session.send(b"\x18")
+    session.paste("List folder renamed")
+    session.send(b"\x13")
+    session.expect("Saved reusable definition")
+    session.send(b"\x03")
+    assert session.finish() == b""
+    assert "List folder renamed" in source.read_text()
+    return ["F2 opens framed authoring", "physical title/command/tag spaces", "inline required placeholder inference", "whitespace tag deduplication", "custom-source creation and owning-source editing", "dirty-cancel keep draft", "save/cancel emit no stdout", "Mocha/custom colors and explicit no-color"]
 
 
 def flows(root):
@@ -182,7 +232,7 @@ def flows(root):
     session.send(b"\x03")
     assert session.finish() == b""
     session = Session(root, ["exec", "Valid port", "--set", "port=0"])
-    session.expect("invalid")
+    session.expect("must be an integer in [1, 65535]")
     session.send(b"\x13")
     assert session.process.poll() is None, "invalid Ctrl-S submitted"
     session.send(b"\x18")
@@ -190,11 +240,34 @@ def flows(root):
     session.send(b"\r")
     assert session.finish() == b"echo 8080\n"
     session = Session(root, ["exec", "Two inputs"])
-    session.expect("Fill inputs")
+    session.expect("Live preview")
     session.send(b"\x13")
     assert session.finish() == b"echo one two\n", "Ctrl-S did not submit from the first field"
+    session = Session(root, ["exec", "Two inputs"])
+    session.expect("Enter:next")
+    session.send(b"\r")
+    session.expect("Enter:submit")
+    assert session.process.poll() is None, "Enter on a non-last input submitted early"
+    session.send(b"\r")
+    assert session.finish() == b"echo one two\n", "Enter on the last input did not submit"
+    session = Session(root, ["exec", "Two inputs"], color=True)
+    session.expect("Live preview")
+    assert b"\x1b[38;" in session.screen, "redirected stdout suppressed automatic form colors"
+    session.send(b"\r\r")
+    assert session.finish() == b"echo one two\n", "colored UI leaked into shell insertion"
+    repeat = root / "repeat-form"
+    repeat.mkdir()
+    (repeat / "config.yaml").write_text("settings:\n  project_source: false\nsnippets:\n  - name: Repeated items\n    command: echo {{items}}\n    inputs:\n      - {name: items, kind: repeat, flag: '-i', default: [one], required: true}\n")
+    session = Session(repeat, ["exec", "Repeated items"])
+    session.expect("Live preview")
+    session.send(b"\x18")
+    session.paste("two words")
+    session.send(b"\t" * 3)
+    session.expect("Enter:submit")
+    session.send(b"\r")
+    assert session.finish() == b"echo -i 'two words'\n", "repeat form required Ctrl-S or lost item quoting"
     session = Session(root, ["exec", "Conditional"])
-    session.expect("Fill inputs")
+    session.expect("Live preview")
     session.send(b"\x1b[C\t\x18")
     session.expect("required")
     session.send(b"\x1b[Z\x1b[D\x13")
@@ -202,10 +275,10 @@ def flows(root):
     session = Session(root, ["add"])
     session.expect("Edit command")
     session.paste("New command")
-    session.send(b"\t\t\t")
+    session.send(b"\t")
     session.paste("echo hi")
     session.send(b"\x13")
-    session.expect("Saved to")
+    session.expect("Saved to ")
     session.send(b"\x1b")
     assert session.finish() == b""
     assert "New command" in (root / "created.snippets.yaml").read_text()
@@ -217,7 +290,7 @@ def flows(root):
         session.send(b"\x18")
         session.paste(new)
         session.send(b"\x13")
-        session.expect("Saved to")
+        session.expect("Saved to ")
         session.send(b"\x1b")
         assert session.finish() == b""
         ids = [line for line in owner.read_text().splitlines() if "id:" in line]
@@ -249,6 +322,13 @@ def flows(root):
         session.expect("CS — command library")
         session.send(b"\x03")
         assert session.finish() == b""
+    session = Session(root, size=(24, 6), color=True)
+    session.expect("CS — command library")
+    session.paste("a" * 13 + "日")
+    session.send(b"\x1b[D")
+    session.expect("\x1b[7m日")
+    session.send(b"\x03")
+    assert session.finish() == b""
     session = Session(root)
     session.expect("CS — command library")
     session.send(b"\x0f")
@@ -261,6 +341,20 @@ def flows(root):
     recovery = root / "recovery"
     recovery.mkdir()
     (recovery / "config.yaml").write_text("settings:\n  sources: [missing.yaml]\nsnippets: []\n")
+    session = Session(recovery, size=(24, 6))
+    for shortcut in ("Ctrl-R:", "Ctrl-O:", "Esc:"):
+        session.expect(shortcut)
+    session.send(b"\x03")
+    assert session.finish() == b""
+    malformed = root / "malformed-recovery"
+    malformed.mkdir()
+    (malformed / "config.yaml").write_text("settings: [\n")
+    session = Session(malformed, size=(24, 6))
+    session.expect("Ctrl-R:")
+    session.expect("Esc:")
+    assert b"Ctrl-O:" not in session.screen, "unavailable settings shortcut advertised"
+    session.send(b"\x03")
+    assert session.finish() == b""
     session = Session(recovery)
     session.expect("Library needs repair")
     session.send(b"\x0f")
@@ -277,12 +371,12 @@ def flows(root):
     session.expect("CS — command library")
     session.send(b"\x03")
     assert session.finish() == b""
-    return ["controlling terminal with stdin redirected", "search/use without execution", "explicit execution prompt uses scratch stub and honors n/Ctrl-C/y", "cancel with empty stdout", "invalid all-preset form blocked by Ctrl-S then valid insertion", "Ctrl-S submit from a non-last input field", "conditional required field hides and emits typed zero", "guided add/save without emission", "pod authoring by marking, flag/special, mapped choices and explicit duplicate linking", "owner-local rename with stable ID", "tag intersections, All/Untagged and no-match recovery", "settings controls and invalid-source recovery", "responsive terminal dimensions", "20x5 resize to 90x24"]
+    return ["controlling terminal with stdin redirected", "search/use without execution", "explicit execution prompt uses scratch stub and honors n/Ctrl-C/y", "cancel with empty stdout", "invalid all-preset form blocked by Ctrl-S then valid insertion", "Ctrl-S submit from a non-last input field", "Enter advances then submits last input", "automatic form colors with redirected stdout and clean insertion", "repeat form inserts quoted items with Enter", "conditional required field hides and emits typed zero", "guided add/save without emission", "pod authoring by inline inference, flag/special, mapped choices and repeated placeholders", "owner-local rename with stable ID", "tag intersections, All/Untagged and no-match recovery", "settings controls and invalid-source recovery", "responsive terminal dimensions", "wide block cursor survives clipped colored search", "actionable recovery shortcuts visible at 24x6", "20x5 resize to 90x24"]
 
 
 with tempfile.TemporaryDirectory(prefix="cs-pty-") as directory:
     root = Path(directory)
-    receipts = {"flows": flows(root), "terminal": "140x40, 120x30, 90x24, 60x18, 40x10, 20x5 and resize", "filesystem": "local scratch; warm after first launch", "binary": BINARY}
+    receipts = {"flows": flows(root), "theme_editor_flows": theme_editor_flows(root / "theme-editor"), "terminal": "140x40, 120x30, 90x24, 60x18, 40x10, 24x6, 20x5 and resize", "filesystem": "local scratch; warm after first launch", "binary": BINARY}
     perf = root / "performance"
     perf.mkdir()
     workload(perf, 10000)

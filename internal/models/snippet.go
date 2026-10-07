@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/samling/command-snippets/internal/theme"
 	"golang.org/x/text/cases"
 )
 
@@ -17,14 +18,19 @@ type Config struct {
 }
 
 type Settings struct {
-	Sources       []string `yaml:"sources,omitempty"`
-	ProjectSource bool     `yaml:"project_source"`
-	DefaultSource string   `yaml:"default_source,omitempty"`
-	Color         string   `yaml:"color,omitempty"`
+	Sources       []string          `yaml:"sources,omitempty"`
+	ProjectSource bool              `yaml:"project_source"`
+	DefaultSource string            `yaml:"default_source,omitempty"`
+	Color         string            `yaml:"color,omitempty"`
+	Theme         string            `yaml:"theme,omitempty"`
+	ThemeColors   map[string]string `yaml:"theme_colors,omitempty"`
 }
 
 func DefaultSettings() Settings { return Settings{ProjectSource: true, Color: "auto"} }
 func (s Settings) Validate() error {
+	if err := theme.Validate(s.Theme, s.ThemeColors); err != nil {
+		return err
+	}
 	if s.Color != "auto" && s.Color != "always" && s.Color != "never" {
 		return fmt.Errorf("color must be auto, always, or never")
 	}

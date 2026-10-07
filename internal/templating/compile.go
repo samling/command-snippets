@@ -16,12 +16,13 @@ type compiledCondition struct {
 	program    *vm.Program
 }
 type Template struct {
-	Snippet     models.Snippet
-	segments    []segment
-	expressions map[string]*vm.Program
-	visible     map[string]compiledCondition
-	required    map[string]compiledCondition
-	order       []int
+	Snippet          models.Snippet
+	segments         []segment
+	expressions      map[string]*vm.Program
+	expressionInputs map[string][]string
+	visible          map[string]compiledCondition
+	required         map[string]compiledCondition
+	order            []int
 }
 
 // Compile is the only entry point for template/schema validation on every surface.
@@ -29,7 +30,7 @@ func Compile(snippet models.Snippet) (*Template, error) {
 	if err := snippet.Validate(); err != nil {
 		return nil, err
 	}
-	template := &Template{Snippet: snippet, expressions: map[string]*vm.Program{}, visible: map[string]compiledCondition{}, required: map[string]compiledCondition{}}
+	template := &Template{Snippet: snippet, expressions: map[string]*vm.Program{}, expressionInputs: map[string][]string{}, visible: map[string]compiledCondition{}, required: map[string]compiledCondition{}}
 	names := map[string]models.Input{}
 	allNames := map[string]bool{}
 	for _, in := range snippet.Inputs {
@@ -41,11 +42,12 @@ func Compile(snippet models.Snippet) (*Template, error) {
 	}
 	for name, source := range snippet.Expressions {
 		allNames[name] = true
-		program, _, err := compileExpression(source, names, false)
+		program, inputs, err := compileExpression(source, names, false)
 		if err != nil {
 			return nil, fmt.Errorf("expression %s: %w", name, err)
 		}
 		template.expressions[name] = program
+		template.expressionInputs[name] = inputs
 	}
 	segments, err := parseCommand(snippet.Command, allNames)
 	if err != nil {

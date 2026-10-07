@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/samling/command-snippets/internal/library"
@@ -17,6 +18,36 @@ import (
 var cfgFile string
 var version = "dev"
 
+// buildVersion is the ldflags version (git describe, from `make install` or a
+// release). A plain `go build` leaves "dev", so fall back to the commit Go
+// embeds in the binary: dev-<short hash>[-dirty].
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return version
+	}
+	revision, dirty := "", false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			dirty = setting.Value == "true"
+		}
+	}
+	if len(revision) < 7 {
+		return version
+	}
+	v := "dev-" + revision[:7]
+	if dirty {
+		v += "-dirty"
+	}
+	return v
+}
+
 type commandState struct {
 	lib     *library.Library
 	noColor bool
@@ -26,7 +57,8 @@ func Execute() error { return NewRoot().Execute() }
 func NewRoot() *cobra.Command {
 	state := &commandState{}
 	var generate bool
-	root := &cobra.Command{Use: "cs", Short: "A searchable command library for your shell", Version: version, SilenceUsage: true, SilenceErrors: true}
+	workspace.Version = buildVersion()
+	root := &cobra.Command{Use: "cs", Short: "A searchable command library for your shell", Version: workspace.Version, SilenceUsage: true, SilenceErrors: true}
 	root.SetOut(os.Stdout)
 	root.SetErr(os.Stderr)
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default $XDG_CONFIG_HOME/cs/config.yaml or $HOME/.config/cs/config.yaml)")

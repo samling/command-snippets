@@ -12,7 +12,22 @@ import (
 	"github.com/samling/command-snippets/internal/models"
 )
 
+// PreviewPart carries presentation metadata, never an executable partial command.
+type PreviewPart struct {
+	Text     string
+	Value    bool
+	Unfilled bool
+	// Name is the placeholder's input or expression name; empty for literal text.
+	Name string
+	// Inputs are the inputs this part derives from, in snippet order: the
+	// placeholder's own input, or an expression's compiler-discovered inputs.
+	Inputs []string
+	// Missing lists the Inputs whose current value blocks an unfilled part.
+	Missing []string
+}
+
 type Result struct {
+	Preview  []PreviewPart
 	Command  string
 	Errors   map[string]string
 	Values   map[string]any
@@ -221,10 +236,19 @@ func (t *Template) Preview(presets map[string]any) Result {
 			}
 		}
 	}
-	if !result.Valid() {
-		return result
-	}
+	// An unrelated invalid input must not hide valid expression fragments.
+	// Expressions with invalid dependencies remain unresolved in the preview.
 	for name, program := range t.expressions {
+		validInputs := true
+		for _, input := range t.expressionInputs[name] {
+			if _, invalid := result.Errors[input]; invalid {
+				validInputs = false
+				break
+			}
+		}
+		if !validInputs {
+			continue
+		}
 		output, err := expr.Run(program, expressionEnv(result.Values))
 		if err != nil {
 			result.Errors[name] = err.Error()
@@ -237,20 +261,35 @@ func (t *Template) Preview(presets map[string]any) Result {
 		}
 		fragments[name] = str
 	}
-	if !result.Valid() {
-		return result
-	}
 	var command strings.Builder
 	for _, segment := range t.segments {
+		part := PreviewPart{Text: segment.literal}
 		if segment.name != "" {
-			command.WriteString(fragments[segment.name])
-		} else {
-			command.WriteString(segment.literal)
+			part.Value = true
+			part.Name = segment.name
+			part.Inputs = t.partInputs(segment.name)
+			var found bool
+			part.Text, found = fragments[segment.name]
+			if !found {
+				part.Text = "{{" + segment.name + "}}"
+				part.Unfilled = true
+				for _, input := range part.Inputs {
+					if _, invalid := result.Errors[input]; invalid {
+						part.Missing = append(part.Missing, input)
+					}
+				}
+			}
 		}
+		command.WriteString(part.Text)
 		if command.Len() > 1<<20 {
 			result.Errors["command"] = "rendered command exceeds 1 MiB"
+			result.Preview = nil
 			return result
 		}
+		result.Preview = append(result.Preview, part)
+	}
+	if !result.Valid() {
+		return result
 	}
 	result.Command = command.String()
 	if strings.ContainsRune(result.Command, 0) {
@@ -258,6 +297,28 @@ func (t *Template) Preview(presets map[string]any) Result {
 		result.Command = ""
 	}
 	return result
+}
+
+// Uses lists the inputs a computed value (expression) reads, in snippet order.
+func (t *Template) Uses(name string) []string { return t.partInputs(name) }
+
+// partInputs names the inputs a placeholder derives from, in snippet order.
+func (t *Template) partInputs(name string) []string {
+	deps, isExpression := t.expressionInputs[name]
+	if !isExpression {
+		return []string{name}
+	}
+	uses := map[string]bool{}
+	for _, dep := range deps {
+		uses[dep] = true
+	}
+	ordered := []string{}
+	for _, in := range t.Snippet.Inputs {
+		if uses[in.Name] {
+			ordered = append(ordered, in.Name)
+		}
+	}
+	return ordered
 }
 func (t *Template) Render(values map[string]any) (string, error) {
 	result := t.Preview(values)

@@ -32,17 +32,50 @@ Search starts focused. Names, descriptions, tags and literal commands are search
 | Key | Library action |
 | --- | --- |
 | Tab / Shift-Tab | Switch search, categories, results and detail |
-| Up / Down | Select a command, or a category in its pane |
+| / | Jump to search from any pane |
+| Up / Down | Select a command, or a category in its pane; scroll the focused preview |
+| PgUp / PgDn | Page the focused preview |
 | Enter | Fill the selected command's inputs, then confirm insertion |
 | Ctrl-L / Ctrl-R | Clear query and filters / reload files |
-| Ctrl-N / Ctrl-E / Ctrl-O | New command / edit selected command / settings |
+| F2 (or Ctrl-N) / Ctrl-E / Ctrl-O | New command / edit selected command / settings |
 | Ctrl-D | Toggle detail on a medium-width terminal |
 | F1 | Contextual help |
 | Esc / Ctrl-C | Cancel with no command output |
 
-In the input view, arrows cycle choices, Tab navigates, and Enter advances or submits the last field; Ctrl-S submits from any input field. Esc returns to the previous search and filters. Required and invalid inputs block insertion. Repeat inputs have separate item rows; spaces within an item are retained. No preview executes a command.
+The input form frames **Inputs** and **Live preview** side by side on wide terminals and stacks them when narrow. Each field is one aligned row with its value in an input well; the focused row has an accent bar, and its description and any validation error appear in a hint at the bottom of the Inputs panel. An empty required field simply reads `required` in its well — no asterisks or repeated error text. The live preview names the inputs a missing part still needs (`awk ‹pattern› ‹logfile›`), even when the command uses an expression such as `{{awk_script}}`, and underlines the part of the command the focused field controls. Pressing Enter on the last field or Ctrl-S on an incomplete form moves focus to the first field that needs attention. Small terminals prioritize the focused value and keyboard actions over frames. The input form keeps the original workflow: Tab or Up/Down navigates fields, Left/Right cycles choices or moves the text cursor, and Enter advances or submits the last field. The default theme keeps magenta focused fields and cyan selected choices; text uses a block cursor. Named themes also color the input form. Ctrl-S remains an optional submit alias, not a required step. Esc returns to the previous search and filters. Required and invalid inputs block insertion. Repeat inputs have separate item rows; spaces within an item are retained. No preview executes a command.
 
-In the editor, Ctrl-Left/Right switches Basics, Inputs, Advanced and Test. Alt-Enter inserts a command newline. Ctrl-P marks a start and end cursor position and opens guided input controls. Ctrl-S validates and saves; dirty cancellation asks before discarding. Settings controls manage source order, project discovery, destination and color.
+The framed editor keeps command details and input configuration in one workspace. Tab/Shift-Tab or Up/Down move between controls (in a multiline Command, Up/Down move between lines first); Left/Right move the cursor or change a choice. Enter on Configure inputs, Computed values or Test preview opens and focuses that pane; Shift-Tab or Up from the pane's first row returns to the action that opened it. The Inputs pane lists each input with its type, flag and requiredness; Enter opens its details, and Esc or Back to inputs returns to the list. Type `ls -lah {{folder_name}}` to create a required text input automatically. Repeated tokens reuse a definition; removing a token keeps its configuration.
+
+**Tags** opens a filtering checklist of every tag already in your library, with counts. Type to filter, Up/Down to pick, Enter to toggle a tag on or off, or Enter on `+ create “word”` to add a new one. Backspace only edits what you typed; untick a tag with Enter. Tab or Esc leaves. Chosen tags show as `a · b` and are stored as a YAML sequence. Merely visiting the field never edits it, so untouched multiword tags are preserved.
+
+**Computed values** (`expressions:` in YAML) build part of a command from inputs when a plain `{{input}}` isn't enough — for example `awk_script: quote("/" + inputs.pattern + "/ {print $0}")` placed with `{{awk_script}}`. Each value has a Name and a Formula; beneath it the pane shows which inputs it uses and its current result from the Test preview values, or a reminder to add `{{name}}` to Command. `+ Add computed value` starts a fresh name with a starter formula and focuses the formula. Formulas read `inputs.<name>`, join text with `+`, choose with `a ? b : c`, and use the helpers `quote`, `flag`, `boolFlag`, `repeatFlag`, `join`, `default` and `empty`; see SNIPPET_GUIDE.md.
+
+Alt-Enter inserts a command newline. Ctrl-S validates and saves without emitting a command; dirty cancellation asks before discarding. New commands use the configured default source, shown as a read-only **Saved to** label; edits retain their owning file.
+
+**Shell use.** Ctrl-S (the zsh widget) inserts the finished command at your prompt. Typing `cs` or `cs exec [NAME] [--set ...]` and pressing Enter does the same with the dotfiles' accept-line hook: the finished command replaces that line, ready to edit or run, and `cs exec` is not added to history. Pipes and captures (`cs exec | pbcopy`, `$(cs exec)`) print the command; `--run` and `--prompt` execute it explicitly.
+
+## Themes
+
+Settings offers `default` and `catppuccin-mocha`. Omitting `theme` (or leaving it empty) preserves the original mixed library/input-form palette. Named themes cover search, panes and selection surfaces, inputs, editor, Settings, help and recovery. Custom colors belong to the main YAML config and are preserved when changing presets in Settings:
+
+```yaml
+settings:
+  sources: [snippets/current/*.yaml]
+  project_source: false
+  default_source: snippets/current/custom.yaml
+  color: auto
+  theme: catppuccin-mocha
+  theme_colors:
+    focus: '#cba6f7'
+    preview: '#89b4fa'
+    background: transparent
+    panel: transparent
+snippets: []
+```
+
+Supported `theme_colors` roles: `text`, `muted`, `focus`, `preview`, `filled`, `unfilled`, `error`, `border`, `selection`, `inactive_selection`, `background`, `panel`. Colors must be quoted `#RRGGBB` values, except `background` and `panel`, which also accept `transparent` to show the terminal background without changing foregrounds or selection highlights. Transparency is opt-in: omitted overrides keep each theme's existing surfaces (Mocha stays opaque). Settings exposes separate **Transparent canvas** and **Transparent panels** toggles; turning them off uses the preset or existing custom opaque override. A no-op save preserves custom colors. Unknown presets, roles or malformed colors enter the existing configuration recovery path. Overrides apply over the chosen preset, including `default`; they are edited in YAML, not a separate theme file. The Mocha colors follow the [official Catppuccin palette](https://catppuccin.com/palette) ([Mocha](https://catppucc.in/mocha/)).
+
+`color: auto` detects stderr's terminal; `always` forces colors, and `never` disables them. `--no-color` and a nonempty `NO_COLOR` take precedence over presets and `always`. Focus markers and a text cursor remain available without ANSI. Saving Settings reloads the appearance. Create an empty `snippets: []` custom source if desired, or let the first save create it when it matches an included glob.
 
 ## CLI
 

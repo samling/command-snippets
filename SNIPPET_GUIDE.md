@@ -13,9 +13,11 @@ Snippet fields are `id`, `name`, `description`, `tags`, `command`, `inputs` and 
 
 ## Guided authoring
 
-Basics contains the title, description, tag rows, multiline command and destination. Paste a command, put the cursor at a value's start, press Ctrl-P, move to its end, and press Ctrl-P again. Choose an input name and behavior. Confirmation replaces only that range with its placeholder. When quotes surround the selection, explicitly choose whether to replace them too. Normal input outputs already include any required shell quoting.
+The framed workspace contains the title, multiline command, description and one Tags field, with input configuration beside it (stacked at narrower sizes). Tab/Shift-Tab traverses controls; Left/Right changes selections. Type or paste `ls -lah {{folder_name}}`: a complete valid token creates a required text input once, in first-occurrence order. Repeated placeholders reuse it; existing definitions and expressions keep their names, types and settings. Partial or invalid tokens remain editable and produce compile feedback. Removing a token does not delete its definition; use the inline Remove action deliberately. Input outputs already include any required shell quoting.
 
-Inputs contains labels/help, behavior, defaults, requiredness, flags, choice label/output rows, special value/output rows, validation and visibility/required conditions. Advanced contains named string expressions. Test uses the same live preview and controls as command use. Missing required test values are reported as an incomplete representative test; the reusable definition can still be saved, but cannot be inserted until its visible inputs validate.
+Tags split on Unicode whitespace and deduplicate using the library's case-folded identity, retaining first spelling/order. Existing multiword tags stay intact while the field is untouched; its help warns that editing splits on whitespace. Saved tags remain a YAML sequence. The read-only Saved to label shows the configured default source for a new command and the owning source for an edit.
+
+The selected input's inline controls contain labels/help, behavior, defaults, requiredness, flags, choice label/output rows, special value/output rows, validation and visibility/required conditions. Expressions and Test preview are discoverable inline actions; no Ctrl-N/Ctrl-P is needed for normal authoring. Test uses the same live preview and controls as command use and never emits or executes a command. Missing required test values are reported as an incomplete representative test; the reusable definition can still be saved, but cannot be inserted until its visible inputs validate.
 
 ## Declarative inputs
 
@@ -123,7 +125,7 @@ snippets: []
 
 Only the main file may contain settings. Relative source/destination paths resolve next to it; `~/` expands to the home directory. Includes load in declared order, glob matches in lexical order, and duplicate canonical paths load once. An empty glob warns; a missing literal path fails. Enabled project discovery reads only the current directory's `.csnippets`. Duplicate display names are allowed; duplicate persisted IDs are not.
 
-Settings defaults are no includes, project discovery enabled, destination equal to the main file, and `color: auto`. Color can be `auto`, `always` or `never`; `--no-color` overrides it. A new destination must be the main file, enabled `.csnippets`, or match a configured include. Changing the default destination does not create a file.
+Settings defaults are no includes, project discovery enabled, destination equal to the main file, `color: auto`, and the original `default` theme. Color can be `auto`, `always` or `never`; `--no-color` and nonempty `NO_COLOR` override it. Main settings also accept `theme: catppuccin-mocha` and optional semantic `theme_colors: {focus: '#cba6f7'}` overrides; see [Themes in README](README.md#themes) for every supported role. A new destination must be the main file, enabled `.csnippets`, or match a configured include. Changing the default destination does not create a file.
 
 Use a single document with a block root mapping and a block snippet sequence. Inline lists/maps within fields and literal/folded command scalars are supported. Anchors, aliases, custom tags, merge keys, duplicate keys, unknown fields and flow-style snippet entries fail closed. The old schema has no compatibility layer or automatic migration. A recovery screen lets you retry after external correction, or remove a broken include through settings when the main file is parseable.
 

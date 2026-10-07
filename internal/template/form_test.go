@@ -65,25 +65,52 @@ func TestNonfieldDiagnosticsVisibleAndFailClosed(t *testing.T) {
 	}
 }
 
-func TestCtrlSSubmitsAnyInputFieldOnlyWhenValid(t *testing.T) {
+func TestEnterNavigatesInputsAndSubmitsLastFieldWhenValid(t *testing.T) {
+	SetupColorProfile(true)
 	s := models.Snippet{Name: "Two fields", Command: "echo {{first}} {{second}}", Inputs: []models.Input{{Name: "first", Default: "one"}, {Name: "second", Required: true}}}
 	f, err := NewForm(s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Update(tea.KeyMsg{Type: tea.KeyCtrlS}) {
+	if f.Update(tea.KeyMsg{Type: tea.KeyEnter}) {
 		t.Fatal("incomplete form submitted")
 	}
 	f.Texts["second"].Set("two")
 	f.Refresh()
 	f.Focus = 0
-	if !f.Update(tea.KeyMsg{Type: tea.KeyCtrlS}) || f.Result.Command != "echo one two" {
-		t.Fatal("Ctrl-S did not submit from the first field")
+	if f.Update(tea.KeyMsg{Type: tea.KeyEnter}) || f.Focus != 1 {
+		t.Fatal("Enter did not advance to the last field")
+	}
+	if !f.Update(tea.KeyMsg{Type: tea.KeyEnter}) || f.Result.Command != "echo one two" {
+		t.Fatal("Enter did not submit the completed form")
+	}
+	if !f.Update(tea.KeyMsg{Type: tea.KeyCtrlS}) {
+		t.Fatal("optional Ctrl-S alias stopped working")
 	}
 	for _, size := range [][2]int{{90, 24}, {40, 10}, {24, 6}} {
 		view := f.View(size[0], size[1])
-		if !strings.Contains(view, "Esc:back") || !strings.Contains(view, "Ctrl-S:use") {
-			t.Fatalf("controls clipped at %v: %q", size, view)
+		if !strings.Contains(view, "Esc:back") || !strings.Contains(view, "Enter:submit") || strings.Contains(view, "Ctrl-S:use") {
+			t.Fatalf("primary Enter controls clipped or replaced at %v: %q", size, view)
 		}
+	}
+}
+
+func TestInputFormArrowNavigationAndOriginalFieldDescriptions(t *testing.T) {
+	SetupColorProfile(true)
+	f, err := NewForm(models.Snippet{Name: "Example", Command: "echo {{first}} {{second}}", Inputs: []models.Input{{Name: "first", Help: "First value"}, {Name: "second", Help: "Second value"}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if f.Focus != 1 {
+		t.Fatal("Down did not move to next input")
+	}
+	f.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if f.Focus != 0 {
+		t.Fatal("Up did not move to previous input")
+	}
+	view := ansi.Strip(f.View(120, 30))
+	if !strings.Contains(view, "Live preview") || !strings.Contains(view, "First value") || strings.Contains(view, "Second value") || strings.Contains(view, "first (First value)") || strings.Contains(view, "second (Second value)") {
+		t.Fatalf("original preview/description layout lost: %s", view)
 	}
 }

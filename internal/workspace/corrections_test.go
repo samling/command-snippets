@@ -14,7 +14,7 @@ func TestStructuralActionsInvalidateEditorTest(t *testing.T) {
 		action      string
 		wantInvalid bool
 	}{
-		{1, "Remove this input", true}, {1, "Remove Choice", false}, {2, "Remove Expression", true},
+		{1, "Remove this input", true}, {1, "Remove choice", false}, {2, "Remove computed value", true},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			lib := fixtureLibrary(t, "snippets:\n  - name: Example\n    command: echo {{x}} {{extra}}\n    inputs:\n      - name: x\n        kind: choice\n        choices: [{label: One, value: one}, {label: Two, value: two}]\n    expressions: {extra: '\"extra\"'}\n")
@@ -31,6 +31,11 @@ func TestStructuralActionsInvalidateEditorTest(t *testing.T) {
 			m.Editor.Test.Refresh()
 			for m.Editor.Section != tc.section {
 				press(m, tea.KeyCtrlLeft)
+			}
+			if tc.section == 1 {
+				// Input actions live in that input's details, not the list.
+				m.Editor.openInput(m.Editor.Inputs[0])
+				m.Editor.Build()
 			}
 			found := false
 			for i, c := range m.Editor.Controls {
@@ -87,9 +92,11 @@ func TestEditorDefaultRowActionPreservesCachedTestValues(t *testing.T) {
 	m.Editor.Test.Refresh()
 	press(m, tea.KeyCtrlLeft)
 	press(m, tea.KeyCtrlLeft)
+	m.Editor.openInput(m.Editor.Inputs[0])
+	m.Editor.Build()
 	found := false
 	for i, c := range m.Editor.Controls {
-		if c.Label == "Remove Default item" && c.Action != nil {
+		if c.Label == "Remove starting item" && c.Action != nil {
 			m.Editor.Focus = i
 			found = true
 			break
