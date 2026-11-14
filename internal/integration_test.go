@@ -1,636 +1,208 @@
-package internal
+package internal_test
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/samling/command-snippets/internal/models"
-	"github.com/samling/command-snippets/internal/template"
-	"gopkg.in/yaml.v3"
+	"github.com/samling/command-snippets/internal/cmd"
 )
 
-// loadTestConfig loads the complete test configuration
-func loadTestConfig(t *testing.T) *models.Config {
-	t.Helper()
-
-	testdataPath := filepath.Join("..", "testdata")
-
-	// Load main config
-	configPath := filepath.Join(testdataPath, "config.yaml")
-	configData, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("Failed to read test config: %v", err)
-	}
-
-	var config models.Config
-	if err := yaml.Unmarshal(configData, &config); err != nil {
-		t.Fatalf("Failed to parse test config: %v", err)
-	}
-
-	// Load transform templates
-	templatesPath := filepath.Join(testdataPath, "transform_templates.yaml")
-	templatesData, err := os.ReadFile(templatesPath)
-	if err != nil {
-		t.Fatalf("Failed to read transform templates: %v", err)
-	}
-
-	var templatesConfig models.Config
-	if err := yaml.Unmarshal(templatesData, &templatesConfig); err != nil {
-		t.Fatalf("Failed to parse transform templates: %v", err)
-	}
-	config.TransformTemplates = templatesConfig.TransformTemplates
-
-	// Load variable types
-	typesPath := filepath.Join(testdataPath, "types.yaml")
-	typesData, err := os.ReadFile(typesPath)
-	if err != nil {
-		t.Fatalf("Failed to read variable types: %v", err)
-	}
-
-	var typesConfig models.Config
-	if err := yaml.Unmarshal(typesData, &typesConfig); err != nil {
-		t.Fatalf("Failed to parse variable types: %v", err)
-	}
-	config.VariableTypes = typesConfig.VariableTypes
-
-	// Load test snippets
-	snippetsPath := filepath.Join(testdataPath, "test_snippets.yaml")
-	snippetsData, err := os.ReadFile(snippetsPath)
-	if err != nil {
-		t.Fatalf("Failed to read test snippets: %v", err)
-	}
-
-	var snippetsConfig models.Config
-	if err := yaml.Unmarshal(snippetsData, &snippetsConfig); err != nil {
-		t.Fatalf("Failed to parse test snippets: %v", err)
-	}
-	config.Snippets = snippetsConfig.Snippets
-
-	return &config
-}
-
-// TestEndToEnd_SimpleSnippet tests a complete workflow with a simple snippet
-func TestEndToEnd_SimpleSnippet(t *testing.T) {
-	config := loadTestConfig(t)
-	processor := template.NewProcessor(config)
-	snippet := config.Snippets["simple-with-vars"]
-
-	values := map[string]string{
-		"message": "Hello",
-		"name":    "World",
-	}
-
-	result, err := processor.ProcessSnippet(&snippet, values)
-	if err != nil {
-		t.Fatalf("Failed to process snippet: %v", err)
-	}
-
-	expected := "echo Hello World"
-	if result != expected {
-		t.Errorf("Expected %q, got %q", expected, result)
+func TestRenderLimitFailureHasEmptyStdout(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	path := filepath.Join(dir, "config.yaml")
+	for _, expanded := range []bool{false, true} {
+		body := "snippets:\n  - name: Large\n    command: " + strings.Repeat("x", (1<<20)+1) + "\n"
+		args := []string{"render", "Large"}
+		if expanded {
+			body = "snippets:\n  - name: Large\n    command: '{{value}}'\n    inputs:\n      - name: value\n"
+			args = append(args, "--set", "value="+strings.Repeat("x", (1<<20)+1))
+		}
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		root := cmd.NewRoot()
+		var stdout, stderr bytes.Buffer
+		root.SetOut(&stdout)
+		root.SetErr(&stderr)
+		root.SetArgs(append([]string{"--config", path}, args...))
+		err := root.Execute()
+		if err == nil || stdout.Len() != 0 || !strings.Contains(err.Error(), "rendered command exceeds 1 MiB") {
+			t.Fatalf("expanded=%t error=%v stdout length=%d", expanded, err, stdout.Len())
+		}
 	}
 }
 
-// TestEndToEnd_KubernetesWorkflow tests a Kubernetes-style workflow
-func TestEndToEnd_KubernetesWorkflow(t *testing.T) {
-	config := loadTestConfig(t)
-	processor := template.NewProcessor(config)
+func TestCanonicalCLIIntegrationAndOutputSafety(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	path := filepath.Join(dir, "config.yaml")
+	data := `settings:
+  project_source: false
+snippets:
+  - name: Friendly command
+    command: echo {{value}} $HOME
+    inputs:
+      - name: value
+        required: true
+  - name: Duplicate
+    command: echo one
+  - name: Duplicate
+    command: echo two
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+		fail bool
+	}{{[]string{"render", "Friendly command", "--set", "value=hello world"}, "echo 'hello world' $HOME\n", false}, {[]string{"render", "Friendly command"}, "", true}, {[]string{"render", "Duplicate"}, "", true}, {[]string{"render", "Friendly command", "--set", "unknown=x"}, "", true}, {[]string{"validate"}, "", false}, {[]string{"list", "--query", "Friendly"}, "Friendly command\n", false}, {[]string{"list"}, "Duplicate\nDuplicate\nFriendly command\n", false}, {[]string{"list", "--query", "no-match-ever"}, "", false}, {[]string{"exec", "Friendly command", "--set", "value=hello", "--run", "--prompt"}, "", true}} {
+		root := cmd.NewRoot()
+		var stdout, stderr bytes.Buffer
+		root.SetOut(&stdout)
+		root.SetErr(&stderr)
+		root.SetArgs(append([]string{"--config", path}, tc.args...))
+		err := root.Execute()
+		if (err != nil) != tc.fail || stdout.String() != tc.want {
+			t.Fatalf("%v stdout=%q error=%v", tc.args, stdout.String(), err)
+		}
+	}
+	actual, err := os.ReadFile(path)
+	if err != nil || string(actual) != data {
+		t.Fatal("read-only CLI changed config")
+	}
+	root := cmd.NewRoot()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"--config", path, "list", "--json"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	wantJSON := "[{\"name\":\"Duplicate\",\"description\":\"\",\"tags\":[],\"source\":%q,\"id\":null},{\"name\":\"Duplicate\",\"description\":\"\",\"tags\":[],\"source\":%q,\"id\":null},{\"name\":\"Friendly command\",\"description\":\"\",\"tags\":[],\"source\":%q,\"id\":null}]\n"
+	if out.String() != fmt.Sprintf(wantJSON, path, path, path) {
+		t.Fatalf("JSON list changed: %q", out.String())
+	}
+}
 
-	scenarios := []struct {
-		name     string
-		snippet  string
-		values   map[string]string
-		expected string
+func TestCanonicalCLITypedPresetsIDsAndExplicitExecution(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	path := filepath.Join(dir, "config.yaml")
+	id := "12345678-1234-4234-8234-123456789abc"
+	body := `settings: {project_source: false, sources: ['missing*.yaml']}
+snippets:
+  - id: ` + id + `
+    name: Duplicate
+    command: echo first
+  - name: Duplicate
+    command: echo second
+  - name: Typed
+    command: echo {{port}} {{choice}} {{toggle}} {{pattern}} {{env}}
+    inputs:
+      - {name: port, default: "80", validate: {range: [1, 65535]}}
+      - {name: choice, kind: choice, choices: [{label: CPU, value: "3"}, {label: Memory, value: "4"}]}
+      - {name: toggle, kind: toggle, flag: -x}
+      - {name: pattern, validate: {regex: true}}
+      - {name: env, kind: repeat, flag: -e}
+  - name: Safe command
+    command: echo safe
+`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	execute := func(args ...string) (string, string, error) {
+		t.Helper()
+		root := cmd.NewRoot()
+		var stdout, stderr bytes.Buffer
+		root.SetOut(&stdout)
+		root.SetErr(&stderr)
+		root.SetArgs(append([]string{"--config", path}, args...))
+		err := root.Execute()
+		return stdout.String(), stderr.String(), err
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+		fail bool
 	}{
-		{
-			name:    "get pods in all namespaces",
-			snippet: "snippet-with-transform-template",
-			values: map[string]string{
-				"namespace": "all",
-			},
-			expected: "kubectl get pods -A",
-		},
-		{
-			name:    "get pods in specific namespace",
-			snippet: "snippet-with-transform-template",
-			values: map[string]string{
-				"namespace": "kube-system",
-			},
-			expected: "kubectl get pods -n kube-system",
-		},
-		{
-			name:    "get pods with output format",
-			snippet: "snippet-with-multiple-transforms",
-			values: map[string]string{
-				"namespace":   "default",
-				"output":      "json",
-				"show_labels": "true",
-			},
-			expected: "kubectl get pods -n default -o json --show-labels",
-		},
-	}
-
-	for _, scenario := range scenarios {
-		t.Run(scenario.name, func(t *testing.T) {
-			snippet := config.Snippets[scenario.snippet]
-			result, err := processor.ProcessSnippet(&snippet, scenario.values)
-			if err != nil {
-				t.Fatalf("Failed to process snippet: %v", err)
+		{"ID lookup", []string{"render", "--id", id}, "echo first\n", false},
+		{"trimmed friendly lookup", []string{"render", " Safe command "}, "echo safe\n", false},
+		{"duplicate exec", []string{"exec", "Duplicate"}, "", true},
+		{"malformed ID", []string{"render", "--id", "slug"}, "", true},
+		{"missing ID", []string{"render", "--id", "87654321-1234-4234-8234-123456789abc"}, "", true},
+		{"NAME plus ID", []string{"render", "Duplicate", "--id", id}, "", true},
+		{"missing selection", []string{"render"}, "", true},
+		{"invalid range", []string{"render", "Typed", "--set", "port=0"}, "", true},
+		{"invalid choice", []string{"render", "Typed", "--set", "choice=missing"}, "", true},
+		{"invalid toggle", []string{"render", "Typed", "--set", "toggle=yes"}, "", true},
+		{"invalid regex", []string{"render", "Typed", "--set", "pattern=["}, "", true},
+		{"duplicate scalar", []string{"render", "Typed", "--set", "port=80", "--set", "port=90"}, "", true},
+		{"unknown preset", []string{"render", "Typed", "--set", "unknown=x"}, "", true},
+		{"repeat and equals", []string{"render", "Typed", "--set", "toggle=TRUE", "--set", "env=A=1", "--set", "env=B=hello world"}, "echo 80 3 -x  -e A=1 -e 'B=hello world'\n", false},
+		{"explicit empty does not restore default", []string{"render", "Typed", "--set", "port="}, "echo  3   \n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, err := execute(tc.args...)
+			if (err != nil) != tc.fail || stdout != tc.want {
+				t.Fatalf("stdout=%q want=%q error=%v", stdout, tc.want, err)
 			}
-			if result != scenario.expected {
-				t.Errorf("Expected %q, got %q", scenario.expected, result)
+			if !strings.Contains(stderr, "Warning:") {
+				t.Fatal("unmatched glob warning missing from diagnostic writer")
 			}
 		})
 	}
-}
-
-func TestEndToEnd_NewTemplateSyntax(t *testing.T) {
-	snippet := models.Snippet{
-		Command: "kubectl get pods ${namespace_arg} ${output_arg}",
-		Variables: []models.Variable{
-			{Name: "namespace_mode", Choices: []string{"none", "all", "named"}},
-			{Name: "namespace", VisibleIf: `namespace_mode == "named"`, RequiredIf: `namespace_mode == "named"`},
-			{Name: "output", Choices: []string{"", "wide", "yaml", "json"}},
-		},
-		Computed: map[string]models.ComputedValue{
-			"namespace_arg": {
-				Cases: []models.ComputedCase{
-					{When: `namespace_mode == "all"`, Value: "-A"},
-					{When: `namespace_mode == "named"`, Value: `${flag("-n", namespace)}`},
-					{Default: true, Value: ""},
-				},
-			},
-			"output_arg": {Value: `flag("-o", output)`},
-		},
+	// Replace only this test's PATH with a benign shell receipt. Authored
+	// command text is captured as an argument, never evaluated by the stub.
+	marker := filepath.Join(dir, "shell-called")
+	shell := "#!/bin/sh\nprintf '%s\\n' \"$*\" > '" + marker + "'\nprintf 'stub executed\\n'\n"
+	if err := os.WriteFile(filepath.Join(dir, "sh"), []byte(shell), 0700); err != nil {
+		t.Fatal(err)
 	}
-
-	processor := template.NewProcessor(&models.Config{})
-
-	t.Run("named namespace with output", func(t *testing.T) {
-		result, err := processor.ProcessSnippet(&snippet, map[string]string{
-			"namespace_mode": "named",
-			"namespace":      "default",
-			"output":         "json",
-		})
-		if err != nil {
-			t.Fatalf("ProcessSnippet failed: %v", err)
+	t.Setenv("PATH", dir)
+	for i, args := range [][]string{{"render", "Safe command"}, {"exec", "Safe command"}, {"exec", "Typed", "--run", "--set", "port=0", "--set", "choice=CPU", "--set", "toggle=false", "--set", "pattern=", "--set", "env=A=1"}} {
+		stdout, _, err := execute(args...)
+		if i < 2 && (err != nil || stdout != "echo safe\n") {
+			t.Fatalf("default path failed: stdout=%q error=%v", stdout, err)
 		}
-		if result != "kubectl get pods -n default -o json" {
-			t.Fatalf("got %q", result)
+		if i == 2 && (err == nil || stdout != "") {
+			t.Fatalf("invalid execution was accepted: stdout=%q error=%v", stdout, err)
 		}
-	})
-
-	t.Run("all namespaces without output", func(t *testing.T) {
-		result, err := processor.ProcessSnippet(&snippet, map[string]string{
-			"namespace_mode": "all",
-			"output":         "",
-		})
-		if err != nil {
-			t.Fatalf("ProcessSnippet failed: %v", err)
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatal("default/invalid path spawned a shell")
 		}
-		if result != "kubectl get pods -A" {
-			t.Fatalf("got %q", result)
-		}
-	})
-
-	t.Run("hidden namespace default does not leak with all namespaces", func(t *testing.T) {
-		snippetWithDefault := snippet
-		snippetWithDefault.Variables = append([]models.Variable(nil), snippet.Variables...)
-		snippetWithDefault.Variables[1].DefaultValue = "default"
-
-		result, err := processor.ProcessSnippet(&snippetWithDefault, map[string]string{
-			"namespace_mode": "all",
-			"output":         "",
-		})
-		if err != nil {
-			t.Fatalf("ProcessSnippet failed: %v", err)
-		}
-		if result != "kubectl get pods -A" {
-			t.Fatalf("got %q", result)
-		}
-	})
-
-	t.Run("hidden namespace default does not leak with no namespace", func(t *testing.T) {
-		snippetWithDefault := snippet
-		snippetWithDefault.Variables = append([]models.Variable(nil), snippet.Variables...)
-		snippetWithDefault.Variables[1].DefaultValue = "default"
-
-		result, err := processor.ProcessSnippet(&snippetWithDefault, map[string]string{
-			"namespace_mode": "none",
-			"output":         "",
-		})
-		if err != nil {
-			t.Fatalf("ProcessSnippet failed: %v", err)
-		}
-		if result != "kubectl get pods" {
-			t.Fatalf("got %q", result)
-		}
-	})
-}
-
-// TestEndToEnd_DockerWorkflow tests a Docker-style workflow
-func TestEndToEnd_DockerWorkflow(t *testing.T) {
-	config := loadTestConfig(t)
-	processor := template.NewProcessor(config)
-
-	scenarios := []struct {
-		name     string
-		snippet  string
-		values   map[string]string
-		expected string
-	}{
-		{
-			name:    "docker run simple",
-			snippet: "snippet-with-complex-computed",
-			values: map[string]string{
-				"image_name": "nginx",
-				"port":       "",
-				"volume":     "",
-				"detach":     "false",
-			},
-			expected: "docker run  nginx",
-		},
-		{
-			name:    "docker run with port",
-			snippet: "snippet-with-complex-computed",
-			values: map[string]string{
-				"image_name": "nginx",
-				"port":       "8080:80",
-				"volume":     "",
-				"detach":     "false",
-			},
-			expected: "docker run -p 8080:80  nginx",
-		},
-		{
-			name:    "docker run detached with all options",
-			snippet: "snippet-with-complex-computed",
-			values: map[string]string{
-				"image_name": "nginx",
-				"port":       "8080:80",
-				"volume":     "/data:/app",
-				"detach":     "true",
-			},
-			expected: "docker run -d -p 8080:80 -v /data:/app  nginx",
-		},
 	}
-
-	for _, scenario := range scenarios {
-		t.Run(scenario.name, func(t *testing.T) {
-			snippet := config.Snippets[scenario.snippet]
-			result, err := processor.ProcessSnippet(&snippet, scenario.values)
-			if err != nil {
-				t.Fatalf("Failed to process snippet: %v", err)
-			}
-			if result != scenario.expected {
-				t.Errorf("Expected %q, got %q", scenario.expected, result)
-			}
-		})
+	stdout, _, err := execute("exec", "Safe command", "--run")
+	if err != nil || stdout != "stub executed\n" {
+		t.Fatalf("explicit execution: stdout=%q error=%v", stdout, err)
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "-c echo safe\n" {
+		t.Fatalf("shell arguments: %q %v", data, err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != body {
+		t.Fatal("CLI verification changed source")
 	}
 }
 
-// TestEndToEnd_ValidationWorkflow tests validation workflows
-func TestEndToEnd_ValidationWorkflow(t *testing.T) {
-	config := loadTestConfig(t)
-	processor := template.NewProcessor(config)
-
-	t.Run("enum validation", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-enum"]
-
-		// Valid values
-		validValues := []string{"debug", "info", "warn", "error"}
-		for _, val := range validValues {
-			values := map[string]string{"log_level": val}
-			_, err := processor.ProcessSnippet(&snippet, values)
-			if err != nil {
-				t.Errorf("Valid value %q should not error: %v", val, err)
-			}
-		}
-
-		// Test with default
-		result, err := processor.ProcessSnippet(&snippet, map[string]string{})
-		if err != nil {
-			t.Fatalf("Default value should work: %v", err)
-		}
-		if result != "app --log-level info" {
-			t.Errorf("Expected default 'info', got %q", result)
-		}
-	})
-
-	t.Run("range validation", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-range"]
-
-		// Valid ports
-		validPorts := []string{"1", "80", "8080", "65535"}
-		for _, port := range validPorts {
-			values := map[string]string{"port": port}
-			_, err := processor.ProcessSnippet(&snippet, values)
-			if err != nil {
-				t.Errorf("Valid port %q should not error: %v", port, err)
-			}
-		}
-
-		// Test with default
-		result, err := processor.ProcessSnippet(&snippet, map[string]string{})
-		if err != nil {
-			t.Fatalf("Default port should work: %v", err)
-		}
-		if result != "server --port 8080" {
-			t.Errorf("Expected default port '8080', got %q", result)
-		}
-	})
-
-	t.Run("pattern validation", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-pattern"]
-
-		// Valid versions
-		validVersions := []string{"1.0.0", "v1.0.0", "2.3.4", "v10.20.30"}
-		for _, version := range validVersions {
-			values := map[string]string{"version": version}
-			_, err := processor.ProcessSnippet(&snippet, values)
-			if err != nil {
-				t.Errorf("Valid version %q should not error: %v", version, err)
-			}
-		}
-	})
-
-	t.Run("regex type validation", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-regex-type"]
-
-		// Valid regex patterns
-		validPatterns := []string{`^test.*$`, `\d+`, `[a-z]+`}
-		for _, pattern := range validPatterns {
-			values := map[string]string{"pattern": pattern}
-			_, err := processor.ProcessSnippet(&snippet, values)
-			if err != nil {
-				t.Errorf("Valid regex %q should not error: %v", pattern, err)
-			}
-		}
-	})
-}
-
-// TestEndToEnd_ComputedVariablesWorkflow tests computed variables
-func TestEndToEnd_ComputedVariablesWorkflow(t *testing.T) {
-	config := loadTestConfig(t)
-	processor := template.NewProcessor(config)
-
-	t.Run("simple composition", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-computed-simple"]
-		values := map[string]string{
-			"resource_type": "pod",
-			"resource_name": "my-pod",
-		}
-		result, err := processor.ProcessSnippet(&snippet, values)
-		if err != nil {
-			t.Fatalf("Failed to process snippet: %v", err)
-		}
-		if result != "app pod/my-pod" {
-			t.Errorf("Expected 'app pod/my-pod', got %q", result)
-		}
-	})
-
-	t.Run("conditional composition", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-computed-conditional"]
-
-		// Same port
-		values := map[string]string{
-			"host_port":   "8080",
-			"target_port": "",
-		}
-		result, err := processor.ProcessSnippet(&snippet, values)
-		if err != nil {
-			t.Fatalf("Failed to process snippet: %v", err)
-		}
-		if result != "server 8080:8080" {
-			t.Errorf("Expected 'server 8080:8080', got %q", result)
-		}
-
-		// Different ports
-		values = map[string]string{
-			"host_port":   "8080",
-			"target_port": "80",
-		}
-		result, err = processor.ProcessSnippet(&snippet, values)
-		if err != nil {
-			t.Fatalf("Failed to process snippet: %v", err)
-		}
-		if result != "server 8080:80" {
-			t.Errorf("Expected 'server 8080:80', got %q", result)
-		}
-	})
-
-	t.Run("complex composition with conditionals", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-complex-computed"]
-
-		// All options
-		values := map[string]string{
-			"image_name": "nginx",
-			"port":       "8080:80",
-			"volume":     "/data:/app",
-			"detach":     "true",
-		}
-		result, err := processor.ProcessSnippet(&snippet, values)
-		if err != nil {
-			t.Fatalf("Failed to process snippet: %v", err)
-		}
-		expected := "docker run -d -p 8080:80 -v /data:/app  nginx"
-		if result != expected {
-			t.Errorf("Expected %q, got %q", expected, result)
-		}
-	})
-}
-
-// TestEndToEnd_TransformWorkflow tests various transformations
-func TestEndToEnd_TransformWorkflow(t *testing.T) {
-	config := loadTestConfig(t)
-	processor := template.NewProcessor(config)
-
-	t.Run("boolean transforms", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-boolean"]
-
-		testCases := []struct {
-			verbose  string
-			debug    string
-			expected string
-		}{
-			{"false", "false", "app  "},
-			{"true", "false", "app --verbose "},
-			{"false", "true", "app  -d"},
-			{"true", "true", "app --verbose -d"},
-			{"yes", "false", "app --verbose "},
-			{"1", "false", "app --verbose "},
-		}
-
-		for _, tc := range testCases {
-			values := map[string]string{
-				"verbose": tc.verbose,
-				"debug":   tc.debug,
-			}
-			result, err := processor.ProcessSnippet(&snippet, values)
-			if err != nil {
-				t.Fatalf("Failed to process snippet: %v", err)
-			}
-			if result != tc.expected {
-				t.Errorf("For verbose=%q debug=%q: expected %q, got %q",
-					tc.verbose, tc.debug, tc.expected, result)
-			}
-		}
-	})
-
-	t.Run("value pattern transforms", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-value-pattern"]
-
-		testCases := []struct {
-			format   string
-			expected string
-		}{
-			{"", "app "},
-			{"json", "app --format=json"},
-			{"yaml", "app --format=yaml"},
-		}
-
-		for _, tc := range testCases {
-			values := map[string]string{"output_format": tc.format}
-			result, err := processor.ProcessSnippet(&snippet, values)
-			if err != nil {
-				t.Fatalf("Failed to process snippet: %v", err)
-			}
-			if result != tc.expected {
-				t.Errorf("For format=%q: expected %q, got %q",
-					tc.format, tc.expected, result)
-			}
-		}
-	})
-
-	t.Run("empty value transforms", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-empty-value"]
-
-		testCases := []struct {
-			flag     string
-			expected string
-		}{
-			{"", "app "},
-			{"value", "app --flag=value"},
-		}
-
-		for _, tc := range testCases {
-			values := map[string]string{"optional_flag": tc.flag}
-			result, err := processor.ProcessSnippet(&snippet, values)
-			if err != nil {
-				t.Fatalf("Failed to process snippet: %v", err)
-			}
-			if result != tc.expected {
-				t.Errorf("For flag=%q: expected %q, got %q",
-					tc.flag, tc.expected, result)
-			}
-		}
-	})
-}
-
-// TestEndToEnd_ComprehensiveSnippet tests the snippet with all features
-func TestEndToEnd_ComprehensiveSnippet(t *testing.T) {
-	config := loadTestConfig(t)
-	processor := template.NewProcessor(config)
-	snippet := config.Snippets["snippet-with-all-features"]
-
-	scenarios := []struct {
-		name     string
-		values   map[string]string
-		expected string
-	}{
-		{
-			name: "all features",
-			values: map[string]string{
-				"environment": "prod",
-				"port":        "9000",
-				"verbose":     "true",
-				"log_level":   "debug",
-				"extra_flag":  "test",
-			},
-			expected: "complex-app --env=prod --port=9000 --verbose --log=debug test",
-		},
-		{
-			name: "minimal with defaults",
-			values: map[string]string{
-				"environment": "dev",
-				"port":        "8080",
-				"verbose":     "false",
-				"log_level":   "",
-				"extra_flag":  "",
-			},
-			expected: "complex-app --env=dev --port=8080 ",
-		},
-		{
-			name: "staging environment",
-			values: map[string]string{
-				"environment": "staging",
-				"port":        "8080",
-				"verbose":     "true",
-				"log_level":   "warn",
-				"extra_flag":  "",
-			},
-			expected: "complex-app --env=staging --port=8080 --verbose --log=warn ",
-		},
+func TestCLIHelpAndGenerationIgnoreInvalidLibrary(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("invalid: ["), 0600); err != nil {
+		t.Fatal(err)
 	}
-
-	for _, scenario := range scenarios {
-		t.Run(scenario.name, func(t *testing.T) {
-			result, err := processor.ProcessSnippet(&snippet, scenario.values)
-			if err != nil {
-				t.Fatalf("Failed to process snippet: %v", err)
-			}
-			if result != scenario.expected {
-				t.Errorf("Expected %q, got %q", scenario.expected, result)
-			}
-		})
+	for _, arg := range []string{"--help", "--version", "--generate-config"} {
+		root := cmd.NewRoot()
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetArgs([]string{"--config", path, arg})
+		if err := root.Execute(); err != nil || out.Len() == 0 {
+			t.Fatalf("%s requires valid library: %v %q", arg, err, out.String())
+		}
 	}
-}
-
-// TestEndToEnd_ErrorScenarios tests error handling in complete workflows
-func TestEndToEnd_ErrorScenarios(t *testing.T) {
-	config := loadTestConfig(t)
-
-	t.Run("invalid enum value", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-enum"]
-
-		for _, variable := range snippet.Variables {
-			err := variable.ValidateWithConfig("invalid", config)
-			if err == nil {
-				t.Error("Expected validation error for invalid enum value")
-			}
-		}
-	})
-
-	t.Run("invalid range value", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-range"]
-
-		for _, variable := range snippet.Variables {
-			err := variable.ValidateWithConfig("99999", config)
-			if err == nil {
-				t.Error("Expected validation error for out of range value")
-			}
-		}
-	})
-
-	t.Run("invalid pattern value", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-pattern"]
-
-		for _, variable := range snippet.Variables {
-			err := variable.ValidateWithConfig("invalid", config)
-			if err == nil {
-				t.Error("Expected validation error for invalid pattern")
-			}
-		}
-	})
-
-	t.Run("invalid regex", func(t *testing.T) {
-		snippet := config.Snippets["snippet-with-regex-type"]
-
-		for _, variable := range snippet.Variables {
-			err := variable.ValidateWithConfig("[unclosed", config)
-			if err == nil {
-				t.Error("Expected validation error for invalid regex")
-			}
-		}
-	})
 }

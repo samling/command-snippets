@@ -1,0 +1,19 @@
+# Declarative inputs cover common behavior; expressions are only an escape hatch.
+snippets:
+  - id: 3c8c15d8-a3b3-480c-8f2f-db51f8ba6085
+    name: Search with an optional limit
+    tags: [Examples, Search]
+    command: grep -E {{pattern}} {{path}} {{limit}}
+    inputs:
+      - name: pattern
+        required: true
+        validate: {regex: true}
+      - {name: path, default: .}
+      - name: limit
+        kind: flag
+        flag: -m
+        validate: {range: [1, 10000]}
+  - id: 4c06d2ca-52a1-461c-87e5-0a6fbcdbbf58
+    name: Echo a literal shell variable
+    tags: [Examples]
+    command: echo '${HOME}' "$HOME" '{{{{example}}'

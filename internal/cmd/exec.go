@@ -1,263 +1,131 @@
 package cmd
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
-	"syscall"
+	"runtime"
 
-	"github.com/samling/command-snippets/internal/models"
-	"github.com/samling/command-snippets/internal/template"
-
+	tea "github.com/charmbracelet/bubbletea"
+	forms "github.com/samling/command-snippets/internal/template"
+	"github.com/samling/command-snippets/internal/templating"
+	"github.com/samling/command-snippets/internal/workspace"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
-func newExecCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "exec [template-name]",
-		Short: "Execute a command template with variable substitution",
-		Long: `Execute a command template with interactive variable prompting.
-
-By default, the command will be printed for copying/piping. Use flags to change behavior.
-
-If no template name is provided, you'll be prompted to select from available templates.
-
-Examples:
-  cs exec kubectl-get-pods              # Print command only (default)
-  cs exec kubectl-get-pods --run        # Execute automatically
-  cs exec kubectl-get-pods --prompt     # Prompt before executing
-  cs exec kubectl-get-pods --set namespace=kube-system  # Pre-set variables
-  cs exec docker-run --set port=8080 --set image=nginx  # Multiple variables`,
-		RunE: runExec,
-	}
-
-	// Add execution mode flags
-	cmd.Flags().Bool("run", false, "Automatically execute the command without prompting")
-	cmd.Flags().Bool("prompt", false, "Prompt before executing the command")
-	cmd.Flags().Bool("no-selector", false, "Use internal selector instead of configured external selector")
-	cmd.Flags().Bool("no-color", false, "Disable colored output in the TUI")
-	cmd.Flags().StringArray("set", []string{}, "Set variable values (format: key=value)")
-
+func newExecCmd(state *commandState) *cobra.Command {
+	var id string
+	var sets []string
+	var run, prompt bool
+	cmd := &cobra.Command{Use: "exec [NAME]", Short: "Fill a command and print it; execution is explicit only", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if run && prompt {
+			return fmt.Errorf("--run and --prompt are mutually exclusive")
+		}
+		var command string
+		var err error
+		if len(args) == 0 && id == "" {
+			if len(sets) > 0 {
+				return fmt.Errorf("--set requires NAME or --id")
+			}
+			if !term.IsTerminal(int(os.Stderr.Fd())) {
+				return fmt.Errorf("interactive CS needs a terminal; use render NAME")
+			}
+			command, err = workspace.Run(state.lib, workspace.Options{NoColor: state.noColor})
+		} else {
+			entry, lookupErr := state.lookup(args, id)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			values, presetErr := templating.Presets(entry.Snippet, sets)
+			if presetErr != nil {
+				return presetErr
+			}
+			result := entry.Template.Preview(values)
+			complete := result.Valid()
+			for _, in := range entry.Snippet.Inputs {
+				if result.Visible[in.Name] {
+					if _, set := values[in.Name]; !set {
+						complete = false
+					}
+				}
+			}
+			if complete {
+				command = result.Command
+			} else {
+				if !term.IsTerminal(int(os.Stderr.Fd())) {
+					return fmt.Errorf("incomplete inputs need a terminal; use render NAME --set name=value")
+				}
+				command, err = workspace.Run(state.lib, workspace.Options{Start: "inputs", Entry: entry, Presets: values, NoColor: state.noColor})
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if command == "" {
+			return nil
+		}
+		if prompt {
+			if !term.IsTerminal(int(os.Stderr.Fd())) {
+				return fmt.Errorf("--prompt needs a terminal")
+			}
+			confirmed, err := confirmExecution(command)
+			if err != nil {
+				return err
+			}
+			if !confirmed {
+				return nil
+			}
+		}
+		if run || prompt {
+			shell := "sh"
+			arguments := []string{"-c", command}
+			if runtime.GOOS == "windows" {
+				shell = "cmd.exe"
+				arguments = []string{"/C", command}
+			}
+			child := exec.Command(shell, arguments...)
+			child.Stdin = os.Stdin
+			child.Stdout = cmd.OutOrStdout()
+			child.Stderr = cmd.ErrOrStderr()
+			return child.Run()
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), command)
+		return err
+	}}
+	cmd.Flags().StringVar(&id, "id", "", "select a persisted UUID")
+	cmd.Flags().StringArrayVar(&sets, "set", nil, "input name=value; repeat to append list items")
+	cmd.Flags().BoolVar(&run, "run", false, "explicitly execute the completed command")
+	cmd.Flags().BoolVar(&prompt, "prompt", false, "ask before executing the completed command")
 	return cmd
 }
 
-func runExec(cmd *cobra.Command, args []string) error {
-	processor := template.NewProcessor(config)
+type executionConfirmation struct {
+	command   string
+	confirmed bool
+}
 
-	var snippetName string
-
-	// If snippet name provided as argument
-	if len(args) > 0 {
-		snippetName = args[0]
-	} else {
-		// Interactive snippet selection
-		noSelector, _ := cmd.Flags().GetBool("no-selector")
-		noColor, _ := cmd.Flags().GetBool("no-color")
-		var err error
-		snippetName, err = selectSnippet(noSelector, noColor)
-		if err != nil {
-			// Handle user cancellation silently
-			if isUserCancellation(err) {
-				os.Exit(0)
-			}
-			return fmt.Errorf("failed to select template: %w", err)
+func (m executionConfirmation) Init() tea.Cmd { return nil }
+func (m executionConfirmation) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "y", "Y":
+			m.confirmed = true
+			return m, tea.Quit
+		case "n", "N", "esc", "ctrl+c":
+			return m, tea.Quit
 		}
 	}
-
-	snippet, err := getSnippet(snippetName)
+	return m, nil
+}
+func (m executionConfirmation) View() string {
+	return "Execute this command?\n" + forms.Safe(m.command) + "\ny: execute  n/Esc: cancel"
+}
+func confirmExecution(command string) (bool, error) {
+	program := tea.NewProgram(executionConfirmation{command: command}, tea.WithInputTTY(), tea.WithOutput(os.Stderr))
+	result, err := program.Run()
 	if err != nil {
-		return err
+		return false, err
 	}
-
-	// Get execution mode flags
-	runFlag, _ := cmd.Flags().GetBool("run")
-	promptFlag, _ := cmd.Flags().GetBool("prompt")
-
-	// Validate flags (mutually exclusive)
-	if runFlag && promptFlag {
-		return fmt.Errorf("--run and --prompt flags are mutually exclusive")
-	}
-
-	// Parse --set values
-	setValues, _ := cmd.Flags().GetStringArray("set")
-
-	presetValues, err := parseSetValues(setValues)
-	if err != nil {
-		return fmt.Errorf("invalid --set format: %w", err)
-	}
-
-	known := make(map[string]bool, len(snippet.Variables))
-	for _, v := range snippet.Variables {
-		known[v.Name] = true
-	}
-	for k := range presetValues {
-		if !known[k] {
-			return fmt.Errorf("--set %s: snippet %q has no variable named %q", k, snippetName, k)
-		}
-	}
-
-	// Get no-color flag and pass it to the processor
-	noColor, _ := cmd.Flags().GetBool("no-color")
-	processor.NoColor = noColor
-
-	// Determine execution mode
-	var execMode template.ExecutionMode
-	switch {
-	case runFlag:
-		execMode = template.AutoExecute
-	case promptFlag:
-		execMode = template.PromptExecute
-	default:
-		execMode = template.PrintOnly
-	}
-
-	// Execute with specified mode
-	if err := processor.ExecuteWithModeAndPresets(&snippet, execMode, presetValues); err != nil {
-		if isUserCancellation(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-// selectSnippet shows an interactive snippet selector
-func selectSnippet(forceInternal bool, noColor bool) (string, error) {
-	if len(config.Snippets) == 0 {
-		return "", fmt.Errorf("no templates found")
-	}
-
-	snippetsMap := make(map[string]*models.Snippet, len(config.Snippets))
-	for name, snippet := range config.Snippets {
-		snippetsMap[name] = &snippet
-	}
-	options, byDisplay := buildSnippetOptions(snippetsMap)
-
-	if !forceInternal {
-		selected, err := tryExternalSelector(options, byDisplay)
-		if err == nil {
-			return selected, nil
-		}
-		if isUserCancellation(err) {
-			return "", err
-		}
-		// fall through to bubbletea selector
-	}
-
-	return selectSnippetWithBubbleTea(options, byDisplay, noColor)
-}
-
-// tryExternalSelector attempts to use configured external selector (like fzf)
-func tryExternalSelector(options []string, snippetMap map[string]string) (string, error) {
-	// Check if external selector is configured
-	selectorCmd := config.Settings.Selector.Command
-	if selectorCmd == "" {
-		return "", fmt.Errorf("no external selector configured")
-	}
-
-	// Check if selector command is available
-	if _, err := exec.LookPath(selectorCmd); err != nil {
-		return "", fmt.Errorf("selector command '%s' not found: %w", selectorCmd, err)
-	}
-
-	// Prepare input for selector (one option per line)
-	input := strings.Join(options, "\n")
-
-	// Build command with options
-	var cmdArgs []string
-	if config.Settings.Selector.Options != "" {
-		// Parse options string into individual arguments
-		cmdArgs = strings.Fields(config.Settings.Selector.Options)
-	}
-
-	// Create and run the selector command
-	cmd := exec.Command(selectorCmd, cmdArgs...)
-	cmd.Stdin = strings.NewReader(input)
-
-	var output bytes.Buffer
-	cmd.Stdout = &output
-
-	// Run the command
-	if err := cmd.Run(); err != nil {
-		// Check if this looks like a user cancellation
-		if exitError, ok := err.(*exec.ExitError); ok {
-			if status, ok := exitError.Sys().(syscall.WaitStatus); ok {
-				exitCode := status.ExitStatus()
-				// Common exit codes for user cancellation:
-				// 130 = Ctrl+C (SIGINT)
-				// 1 = general cancellation in many tools
-				if exitCode == 130 || exitCode == 1 {
-					return "", &UserCancellationError{"user cancelled selection"}
-				}
-			}
-		}
-		return "", fmt.Errorf("selector command failed: %w", err)
-	}
-
-	// Parse the selected option
-	selected := strings.TrimSpace(output.String())
-	if selected == "" {
-		return "", &UserCancellationError{"no selection made"}
-	}
-
-	// Look up the actual snippet name
-	if snippetName, exists := snippetMap[selected]; exists {
-		return snippetName, nil
-	}
-
-	return "", fmt.Errorf("selected option not found: %s", selected)
-}
-
-// UserCancellationError indicates the user cancelled the operation
-type UserCancellationError struct {
-	Message string
-}
-
-func (e *UserCancellationError) Error() string {
-	return e.Message
-}
-
-// isUserCancellation checks if an error represents user cancellation
-// from any of the snippet selectors or the variable form.
-func isUserCancellation(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, template.ErrUserCancelled) {
-		return true
-	}
-	var uce *UserCancellationError
-	return errors.As(err, &uce)
-}
-
-// parseSetValues parses --set values into a map
-func parseSetValues(setValues []string) (map[string]string, error) {
-	result := make(map[string]string)
-
-	// Parse --set values
-	for _, setValue := range setValues {
-		key, value, err := parseKeyValue(setValue)
-		if err != nil {
-			return nil, fmt.Errorf("--set %s: %w", setValue, err)
-		}
-		result[key] = value
-	}
-
-	return result, nil
-}
-
-// parseKeyValue parses a key=value string
-func parseKeyValue(input string) (string, string, error) {
-	rawKey, rawValue, ok := strings.Cut(input, "=")
-	if !ok {
-		return "", "", fmt.Errorf("expected format key=value, got: %s", input)
-	}
-	key := strings.TrimSpace(rawKey)
-	if key == "" {
-		return "", "", fmt.Errorf("key cannot be empty")
-	}
-	return key, strings.TrimSpace(rawValue), nil
+	return result.(executionConfirmation).confirmed, nil
 }

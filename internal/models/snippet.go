@@ -1,418 +1,282 @@
 package models
 
 import (
+	"crypto/rand"
 	"fmt"
 	"regexp"
-	"slices"
-	"strconv"
 	"strings"
-	"text/template"
+	"unicode"
 
-	"github.com/samling/command-snippets/internal/templating"
+	"github.com/samling/command-snippets/internal/theme"
+	"golang.org/x/text/cases"
 )
 
-// SnippetSource represents where a snippet was loaded from
-type SnippetSource string
-
-const (
-	SourceGlobal SnippetSource = "global"
-	SourceLocal  SnippetSource = "local"
-)
-
-// Built-in variable type identifiers. User-defined types in
-// Config.VariableTypes use arbitrary strings; these are the two the engine
-// treats specially.
-const (
-	VarTypeBoolean = "boolean"
-	VarTypeRegex   = "regex"
-)
-
-// parseBool returns true for the truthy string forms accepted by snippet
-// boolean variables. Anything else is false (including the empty string).
-func parseBool(s string) bool {
-	switch s {
-	case "true", "yes", "1":
-		return true
-	}
-	return false
-}
-
-// placeholderPattern matches <name> tokens in command templates. Variable
-// names are letters/digits/underscores starting with a letter or underscore.
-var placeholderPattern = regexp.MustCompile(`<([A-Za-z_][A-Za-z0-9_]*)>`)
-
-// Snippet represents a command template
-type Snippet struct {
-	Name        string                   `yaml:"name"`
-	Description string                   `yaml:"description"`
-	Command     string                   `yaml:"command"`
-	Variables   []Variable               `yaml:"variables,omitempty"`
-	Computed    map[string]ComputedValue `yaml:"computed,omitempty"`
-	Tags        []string                 `yaml:"tags,omitempty"`
-	Source      SnippetSource            `yaml:"-"` // Not persisted to YAML, set during loading
-}
-
-type ComputedValue = templating.ComputedValue
-
-type ComputedCase = templating.ComputedCase
-
-// Variable defines a template variable with advanced behavior
-type Variable struct {
-	Name              string      `yaml:"name"`
-	Description       string      `yaml:"description,omitempty"`
-	DefaultValue      string      `yaml:"default,omitempty"`
-	Required          bool        `yaml:"required,omitempty"`
-	Type              string      `yaml:"type,omitempty"`
-	Choices           []string    `yaml:"choices,omitempty"`
-	EmptyLabel        string      `yaml:"empty_label,omitempty"`
-	VisibleIf         string      `yaml:"visible_if,omitempty"`
-	RequiredIf        string      `yaml:"required_if,omitempty"`
-	Transform         *Transform  `yaml:"transform,omitempty"`
-	TransformTemplate string      `yaml:"transform_template,omitempty"`
-	Validation        *Validation `yaml:"validation,omitempty"`
-	Computed          bool        `yaml:"computed,omitempty"`
-}
-
-// Transform defines conditional transformations
-type Transform struct {
-	EmptyValue   string `yaml:"empty_value,omitempty"`
-	ValuePattern string `yaml:"value_pattern,omitempty"`
-	TrueValue    string `yaml:"true_value,omitempty"`
-	FalseValue   string `yaml:"false_value,omitempty"`
-	Compose      string `yaml:"compose,omitempty"`
-
-	composeTpl      *template.Template
-	composeTplErr   error
-	valuePatternTpl *template.Template
-	valuePatternErr error
-}
-
-// composeTemplate returns the parsed Compose template, caching the result.
-// Returns (nil, nil) when Compose is empty.
-func (t *Transform) composeTemplate() (*template.Template, error) {
-	if t.Compose == "" {
-		return nil, nil
-	}
-	if t.composeTpl == nil && t.composeTplErr == nil {
-		t.composeTpl, t.composeTplErr = template.New("compose").Parse(t.Compose)
-	}
-	return t.composeTpl, t.composeTplErr
-}
-
-// valuePatternTemplate returns the parsed ValuePattern template, caching the result.
-// Returns (nil, nil) when ValuePattern is empty.
-func (t *Transform) valuePatternTemplate() (*template.Template, error) {
-	if t.ValuePattern == "" {
-		return nil, nil
-	}
-	if t.valuePatternTpl == nil && t.valuePatternErr == nil {
-		t.valuePatternTpl, t.valuePatternErr = template.New("transform").Parse(t.ValuePattern)
-	}
-	return t.valuePatternTpl, t.valuePatternErr
-}
-
-// Validation defines variable validation rules
-type Validation struct {
-	Pattern string   `yaml:"pattern,omitempty"`
-	Enum    []string `yaml:"enum,omitempty"`
-	Range   []int    `yaml:"range,omitempty"`
-
-	patternRE  *regexp.Regexp
-	patternErr error
-}
-
-// compiledPattern returns the compiled Pattern regex, caching the result.
-func (v *Validation) compiledPattern() (*regexp.Regexp, error) {
-	if v.patternRE == nil && v.patternErr == nil {
-		v.patternRE, v.patternErr = regexp.Compile(v.Pattern)
-	}
-	return v.patternRE, v.patternErr
-}
-
-// TransformTemplate defines a reusable transformation template
-type TransformTemplate struct {
-	Description string     `yaml:"description"`
-	Transform   *Transform `yaml:"transform"`
-}
-
-// VariableType defines reusable variable configurations
-type VariableType struct {
-	Description string      `yaml:"description"`
-	Validation  *Validation `yaml:"validation,omitempty"`
-	Default     string      `yaml:"default,omitempty"`
-	Transform   *Transform  `yaml:"transform,omitempty"`
-}
-
-// Config represents the main configuration file
+// Config is the human-editable document; included sources own snippets, not settings.
 type Config struct {
-	TransformTemplates map[string]TransformTemplate `yaml:"transform_templates"`
-	VariableTypes      map[string]VariableType      `yaml:"variable_types"`
-	Snippets           map[string]Snippet           `yaml:"snippets"`
-	Settings           Settings                     `yaml:"settings"`
+	Settings Settings  `yaml:"settings,omitempty"`
+	Snippets []Snippet `yaml:"snippets"`
 }
 
-// Settings contains global configuration
 type Settings struct {
-	AdditionalConfigs []string       `yaml:"additional_configs,omitempty"`
-	Selector          SelectorConfig `yaml:"selector"`
+	Sources       []string          `yaml:"sources,omitempty"`
+	ProjectSource bool              `yaml:"project_source"`
+	DefaultSource string            `yaml:"default_source,omitempty"`
+	Color         string            `yaml:"color,omitempty"`
+	Theme         string            `yaml:"theme,omitempty"`
+	ThemeColors   map[string]string `yaml:"theme_colors,omitempty"`
 }
 
-type SelectorConfig struct {
-	Command string `yaml:"command"`
-	Options string `yaml:"options"`
-}
-
-// ProcessTemplate processes a snippet with variable substitution.
-func (s *Snippet) ProcessTemplate(values map[string]string, config *Config) (string, error) {
-	rawValues := make(map[string]string, len(s.Variables)+len(values))
-	for _, variable := range s.Variables {
-		rawValues[variable.Name] = variable.DefaultValue
+func DefaultSettings() Settings { return Settings{ProjectSource: true, Color: "auto"} }
+func (s Settings) Validate() error {
+	if err := theme.Validate(s.Theme, s.ThemeColors); err != nil {
+		return err
 	}
-	for name, value := range values {
-		rawValues[name] = value
+	if s.Color != "auto" && s.Color != "always" && s.Color != "never" {
+		return fmt.Errorf("color must be auto, always, or never")
 	}
-
-	processed := make(map[string]string, len(s.Variables))
-	for _, variable := range s.Variables {
-		visible, err := variable.IsVisible(rawValues)
-		if err != nil {
-			return "", err
-		}
-		if !visible {
-			processed[variable.Name] = ""
-			continue
-		}
-
-		result, err := s.ProcessVariable(variable, rawValues[variable.Name], rawValues, config)
-		if err != nil {
-			return "", fmt.Errorf("processing variable %s: %w", variable.Name, err)
-		}
-		processed[variable.Name] = result
-	}
-
-	rendered := placeholderPattern.ReplaceAllStringFunc(s.Command, func(match string) string {
-		name := match[1 : len(match)-1]
-		if val, ok := processed[name]; ok {
-			return val
-		}
-		return match
-	})
-
-	if len(s.Computed) == 0 {
-		return rendered, nil
-	}
-
-	for name := range s.Computed {
-		if _, ok := processed[name]; ok {
-			return "", fmt.Errorf("computed variable %s conflicts with legacy variable", name)
-		}
-		if _, ok := values[name]; ok {
-			return "", fmt.Errorf("computed variable %s conflicts with input value", name)
+	for _, p := range s.Sources {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("source paths cannot be empty")
 		}
 	}
-
-	context := make(map[string]string, len(rawValues)+len(s.Computed))
-	for name, value := range rawValues {
-		context[name] = value
-	}
-
-	computed, err := templating.ResolveComputed(s.Computed, context)
-	if err != nil {
-		return "", err
-	}
-	for name, value := range computed {
-		context[name] = value
-	}
-
-	rendered, err = templating.Interpolate(rendered, context)
-	if err != nil {
-		return "", err
-	}
-	return templating.NormalizeCommandWhitespace(rendered), nil
-}
-
-// ResolveTransform returns the Transform that applies to this variable, either
-// from a named transform_template or the inline definition. Returns nil when
-// the variable has no transform. Errors when a named template is missing.
-func (v *Variable) ResolveTransform(config *Config) (*Transform, error) {
-	if v.TransformTemplate != "" {
-		if config == nil {
-			return nil, fmt.Errorf("transform template %q requires config", v.TransformTemplate)
-		}
-		if tmpl, ok := config.TransformTemplates[v.TransformTemplate]; ok {
-			return tmpl.Transform, nil
-		}
-		return nil, fmt.Errorf("transform template '%s' not found", v.TransformTemplate)
-	}
-	return v.Transform, nil
-}
-
-func (v *Variable) IsVisible(values map[string]string) (bool, error) {
-	if strings.TrimSpace(v.VisibleIf) == "" {
-		return true, nil
-	}
-	visible, err := templating.EvalBool(v.VisibleIf, values)
-	if err != nil {
-		return false, fmt.Errorf("variable %s visible_if: %w", v.Name, err)
-	}
-	return visible, nil
-}
-
-// ProcessVariable applies the variable's transform (if any) to value, using
-// allValues as the binding for compose templates.
-func (s *Snippet) ProcessVariable(variable Variable, value string, allValues map[string]string, config *Config) (string, error) {
-	transform, err := variable.ResolveTransform(config)
-	if err != nil {
-		return "", err
-	}
-
-	if variable.Computed && transform != nil && transform.Compose != "" {
-		tmpl, err := transform.composeTemplate()
-		if err != nil {
-			return "", err
-		}
-		var buf strings.Builder
-		if err := tmpl.Execute(&buf, allValues); err != nil {
-			return "", err
-		}
-		return buf.String(), nil
-	}
-
-	if transform != nil {
-		if variable.Type == VarTypeBoolean {
-			if parseBool(value) {
-				return transform.TrueValue, nil
-			}
-			return transform.FalseValue, nil
-		}
-
-		if value == "" && transform.EmptyValue != "" {
-			return transform.EmptyValue, nil
-		}
-		if value != "" && transform.ValuePattern != "" {
-			tmpl, err := transform.valuePatternTemplate()
-			if err != nil {
-				return "", err
-			}
-			var buf strings.Builder
-			if err := tmpl.Execute(&buf, map[string]string{"Value": value}); err != nil {
-				return "", err
-			}
-			return buf.String(), nil
-		}
-	}
-
-	if value == "" {
-		return variable.DefaultValue, nil
-	}
-	return value, nil
-}
-
-// Validate checks if variable values meet validation criteria
-func (v *Variable) Validate(value string) error {
-	if v.Required && value == "" {
-		return fmt.Errorf("variable %s is required", v.Name)
-	}
-
-	if v.Validation == nil {
-		return nil
-	}
-
-	// Enum validation
-	if len(v.Validation.Enum) > 0 {
-		if slices.Contains(v.Validation.Enum, value) {
-			return nil
-		}
-		return fmt.Errorf("variable %s must be one of: %s", v.Name, strings.Join(v.Validation.Enum, ", "))
-	}
-
-	// Range validation (for numeric types like ports)
-	if len(v.Validation.Range) == 2 && value != "" {
-		num, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("variable %s must be a valid number", v.Name)
-		}
-
-		lo, hi := v.Validation.Range[0], v.Validation.Range[1]
-		if num < lo || num > hi {
-			return fmt.Errorf("variable %s must be between %d and %d", v.Name, lo, hi)
-		}
-	}
-
-	// Pattern validation (regex)
-	if v.Validation.Pattern != "" && value != "" {
-		re, err := v.Validation.compiledPattern()
-		if err != nil {
-			return fmt.Errorf("variable %s has invalid pattern: %w", v.Name, err)
-		}
-		if !re.MatchString(value) {
-			return fmt.Errorf("variable %s does not match required format", v.Name)
-		}
-	}
-
 	return nil
 }
 
-func (v *Variable) ValidateVisible(value string, values map[string]string, config *Config) error {
-	required := v.Required
-	if strings.TrimSpace(v.RequiredIf) != "" {
-		requiredIf, err := templating.EvalBool(v.RequiredIf, values)
-		if err != nil {
-			return fmt.Errorf("variable %s required_if: %w", v.Name, err)
-		}
-		required = required || requiredIf
-	}
-	copy := *v
-	copy.Required = required
-	if len(copy.Choices) > 0 && copy.Validation == nil {
-		copy.Validation = &Validation{Enum: copy.Choices}
-	}
-	return copy.ValidateWithConfig(value, config)
+type Snippet struct {
+	ID          string            `yaml:"id,omitempty" json:"id,omitempty"`
+	Name        string            `yaml:"name" json:"name"`
+	Description string            `yaml:"description,omitempty" json:"description,omitempty"`
+	Tags        []string          `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Command     string            `yaml:"command" json:"command"`
+	Inputs      []Input           `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	Expressions map[string]string `yaml:"expressions,omitempty" json:"expressions,omitempty"`
 }
 
-// ValidateWithConfig checks validation criteria using config context (for type-based validation)
-func (v *Variable) ValidateWithConfig(value string, config *Config) error {
-	if len(v.Choices) > 0 {
-		copy := *v
-		copy.Choices = nil
-		copy.Validation = &Validation{Enum: v.Choices}
-		if err := copy.Validate(value); err != nil {
-			return err
-		}
-	}
+type Input struct {
+	Name         string            `yaml:"name"`
+	Label        string            `yaml:"label,omitempty"`
+	Help         string            `yaml:"help,omitempty"`
+	Kind         string            `yaml:"kind,omitempty"`
+	Default      any               `yaml:"default,omitempty"`
+	Required     bool              `yaml:"required,omitempty"`
+	Flag         string            `yaml:"flag,omitempty"`
+	Choices      []Choice          `yaml:"choices,omitempty"`
+	Special      map[string]string `yaml:"special,omitempty"`
+	Validate     *Validation       `yaml:"validate,omitempty"`
+	VisibleWhen  *Condition        `yaml:"visible_when,omitempty"`
+	RequiredWhen *Condition        `yaml:"required_when,omitempty"`
+}
 
-	// First run standard validation
-	if err := v.Validate(value); err != nil {
-		return err
-	}
+type Choice struct {
+	Label string `yaml:"label"`
+	Value string `yaml:"value"`
+}
+type Validation struct {
+	Pattern string `yaml:"pattern,omitempty"`
+	Range   []int  `yaml:"range,omitempty"`
+	Regex   bool   `yaml:"regex,omitempty"`
+}
+type Condition struct {
+	Input     string `yaml:"input,omitempty"`
+	Equals    any    `yaml:"equals,omitempty"`
+	NotEquals any    `yaml:"not_equals,omitempty"`
+	Expr      string `yaml:"expr,omitempty"`
+}
 
-	// Skip empty values for type validation (unless required, which is handled above)
-	if value == "" {
-		return nil
-	}
+var identifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var uuid = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
-	// Special handling for regex type - validate that the value is a valid regex pattern
-	if v.Type == VarTypeRegex {
-		if _, err := regexp.Compile(value); err != nil {
-			return fmt.Errorf("variable %s must be a valid regular expression: %w", v.Name, err)
-		}
-		return nil
+func ValidIdentifier(s string) bool { return identifier.MatchString(s) }
+func ValidID(s string) bool         { return uuid.MatchString(s) }
+func NewID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
 	}
-
-	// Type-based validation using variable_types from config
-	if v.Type != "" && config != nil {
-		if varType, exists := config.VariableTypes[v.Type]; exists {
-			if varType.Validation != nil {
-				// Create a temporary variable with the type's validation rules
-				tempVar := Variable{
-					Name:       v.Name,
-					Type:       v.Type,
-					Validation: varType.Validation,
+	b[6] = (b[6] & 15) | 64
+	b[8] = (b[8] & 63) | 128
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+func TagKey(s string) string { return cases.Fold().String(strings.TrimSpace(s)) }
+func (in Input) InputKind() string {
+	if in.Kind == "" {
+		return "text"
+	}
+	return in.Kind
+}
+func (in Input) DisplayName() string {
+	if in.Label != "" {
+		return in.Label
+	}
+	return in.Name
+}
+func (in Input) Zero() any {
+	switch in.InputKind() {
+	case "toggle":
+		return false
+	case "repeat":
+		return []string{}
+	default:
+		return ""
+	}
+}
+func (in Input) DefaultValue() any {
+	if in.Default != nil {
+		if in.InputKind() == "repeat" {
+			switch v := in.Default.(type) {
+			case []any:
+				r := make([]string, len(v))
+				for i, x := range v {
+					r[i], _ = x.(string)
 				}
-				return tempVar.Validate(value)
+				return r
+			case []string:
+				return append([]string{}, v...)
+			}
+		}
+		return in.Default
+	}
+	if in.InputKind() == "choice" && len(in.Choices) > 0 {
+		return in.Choices[0].Label
+	}
+	return in.Zero()
+}
+func noControls(s string) bool {
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Snippet) Validate() error {
+	if strings.TrimSpace(s.Name) == "" || strings.TrimSpace(s.Command) == "" {
+		return fmt.Errorf("name and command are required; example: snippets: [{name: List pods, command: kubectl get pods}]")
+	}
+	if !noControls(s.Name) {
+		return fmt.Errorf("name must not contain terminal control characters")
+	}
+	s.Name = strings.TrimSpace(s.Name)
+	if s.ID != "" && !ValidID(s.ID) {
+		return fmt.Errorf("id must be a canonical lowercase UUID v4")
+	}
+	seenTags := map[string]bool{}
+	tags := []string{}
+	for _, tag := range s.Tags {
+		if !noControls(tag) {
+			return fmt.Errorf("tags must not contain terminal control characters")
+		}
+		tag = strings.TrimSpace(tag)
+		if tag == "" || !noControls(tag) {
+			return fmt.Errorf("tags must be nonempty and contain no control characters")
+		}
+		key := TagKey(tag)
+		if !seenTags[key] {
+			seenTags[key] = true
+			tags = append(tags, tag)
+		}
+	}
+	s.Tags = tags
+	names := map[string]bool{}
+	for _, in := range s.Inputs {
+		if !ValidIdentifier(in.Name) || names[in.Name] {
+			return fmt.Errorf("input %q must have a unique identifier", in.Name)
+		}
+		names[in.Name] = true
+		kind := in.InputKind()
+		switch kind {
+		case "text", "flag", "toggle", "choice", "repeat":
+		default:
+			return fmt.Errorf("input %s: unknown kind %q", in.Name, kind)
+		}
+		if (kind == "flag" || kind == "toggle" || kind == "repeat") && strings.TrimSpace(in.Flag) == "" {
+			return fmt.Errorf("input %s requires a flag", in.Name)
+		}
+		if in.Flag != "" && kind != "flag" && kind != "toggle" && kind != "repeat" {
+			return fmt.Errorf("input %s: flag is only valid for flag, toggle, repeat", in.Name)
+		}
+		if len(in.Special) > 0 && (kind == "toggle" || kind == "repeat") {
+			return fmt.Errorf("input %s: special output is not supported for %s", in.Name, kind)
+		}
+		if kind == "choice" {
+			if len(in.Choices) == 0 {
+				return fmt.Errorf("input %s requires choices", in.Name)
+			}
+			labels := map[string]bool{}
+			for _, c := range in.Choices {
+				if strings.TrimSpace(c.Label) == "" || labels[c.Label] {
+					return fmt.Errorf("input %s: choice labels must be nonempty and unique", in.Name)
+				}
+				labels[c.Label] = true
+			}
+		}
+		if kind != "choice" && len(in.Choices) > 0 {
+			return fmt.Errorf("input %s: choices require kind choice", in.Name)
+		}
+		if in.Default != nil {
+			switch kind {
+			case "toggle":
+				if _, ok := in.Default.(bool); !ok {
+					return fmt.Errorf("input %s: default must be boolean", in.Name)
+				}
+			case "repeat":
+				switch d := in.Default.(type) {
+				case []string:
+				case []any:
+					for _, v := range d {
+						if _, ok := v.(string); !ok {
+							return fmt.Errorf("input %s: default items must be strings", in.Name)
+						}
+					}
+				default:
+					return fmt.Errorf("input %s: default must be a string list", in.Name)
+				}
+			default:
+				if _, ok := in.Default.(string); !ok {
+					return fmt.Errorf("input %s: default must be a string", in.Name)
+				}
+			}
+		}
+		if in.Validate != nil {
+			if kind == "toggle" {
+				return fmt.Errorf("input %s: toggle inputs do not support pattern/range/regex content validation; use required or required_when", in.Name)
+			}
+			v := in.Validate
+			if v.Pattern != "" {
+				if _, err := regexp.Compile(v.Pattern); err != nil {
+					return fmt.Errorf("input %s: pattern: %w", in.Name, err)
+				}
+			}
+			if v.Range != nil && (len(v.Range) != 2 || v.Range[0] > v.Range[1]) {
+				return fmt.Errorf("input %s: range must contain two ordered bounds", in.Name)
 			}
 		}
 	}
-
+	for name := range s.Expressions {
+		if !ValidIdentifier(name) || names[name] {
+			return fmt.Errorf("expression %q must have a unique identifier", name)
+		}
+		names[name] = true
+	}
+	for _, in := range s.Inputs {
+		for _, c := range []*Condition{in.VisibleWhen, in.RequiredWhen} {
+			if c == nil {
+				continue
+			}
+			if c.Expr != "" {
+				if c.Input != "" || c.Equals != nil || c.NotEquals != nil {
+					return fmt.Errorf("input %s: condition must use expr or a comparison, not both", in.Name)
+				}
+			} else {
+				if c.Input == in.Name || !names[c.Input] {
+					return fmt.Errorf("input %s: invalid condition input %q", in.Name, c.Input)
+				}
+				if (c.Equals != nil) == (c.NotEquals != nil) {
+					return fmt.Errorf("input %s: condition needs exactly one of equals or not_equals", in.Name)
+				}
+			}
+		}
+	}
 	return nil
 }

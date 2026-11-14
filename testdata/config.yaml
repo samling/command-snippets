@@ -1,8 +1,6 @@
 settings:
-  additional_configs:
-    - testdata/test_snippets.yaml
-    - testdata/types.yaml
-    - testdata/transform_templates.yaml
-  selector:
-    command: fzf
-    options: --height 60% --reverse --border
+  sources: [test_snippets.yaml]
+  project_source: false
+  default_source: test_snippets.yaml
+  color: never
+snippets: []

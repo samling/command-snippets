@@ -2,260 +2,120 @@ package templating
 
 import (
 	"fmt"
-	"sort"
-	"strings"
-	"unicode"
+	"reflect"
 
 	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/ast"
+	"github.com/expr-lang/expr/conf"
+	"github.com/expr-lang/expr/parser"
+	"github.com/expr-lang/expr/vm"
+	"github.com/samling/command-snippets/internal/models"
 )
 
-type ComputedValue struct {
-	// Value is evaluated as an expr expression; quote string literals explicitly.
-	Value string `yaml:"value,omitempty"`
-	// Case values are interpolation text rendered with Interpolate.
-	Cases []ComputedCase `yaml:"cases,omitempty"`
+type expressionCheck struct {
+	names        map[string]models.Input
+	dependencies map[string]bool
+	err          error
+	nodes        int
 }
 
-type ComputedCase struct {
-	When    string `yaml:"when,omitempty"`
-	Value   string `yaml:"value,omitempty"`
-	Default bool   `yaml:"default,omitempty"`
-}
-
-func EvalBool(expression string, values map[string]string) (bool, error) {
-	if strings.TrimSpace(expression) == "" {
-		return true, nil
+func (v *expressionCheck) Visit(node *ast.Node) {
+	v.nodes++
+	if v.nodes > 1000 {
+		v.err = fmt.Errorf("expression exceeds 1000 nodes")
+		return
 	}
-	out, err := eval(expression, values)
-	if err != nil {
-		return false, err
-	}
-	b, ok := out.(bool)
-	if !ok {
-		return false, fmt.Errorf("expression must return boolean, got %T", out)
-	}
-	return b, nil
-}
-
-func EvalString(expression string, values map[string]string) (string, error) {
-	out, err := eval(expression, values)
-	if err != nil {
-		return "", err
-	}
-	return toString(out), nil
-}
-
-func Interpolate(input string, values map[string]string) (string, error) {
-	var result strings.Builder
-	for i := 0; i < len(input); {
-		if i+1 >= len(input) || input[i] != '$' || input[i+1] != '{' {
-			result.WriteByte(input[i])
-			i++
-			continue
+	switch n := (*node).(type) {
+	case *ast.MemberNode:
+		root, ok := n.Node.(*ast.IdentifierNode)
+		prop, pok := n.Property.(*ast.StringNode)
+		if !ok || !pok || root.Value != "inputs" || n.Method || n.Optional {
+			v.err = fmt.Errorf("only inputs.name access is supported")
+			return
 		}
-
-		expression, end, ok := scanInterpolationExpression(input, i+2)
-		if !ok {
-			result.WriteString(input[i:])
-			break
+		if _, exists := v.names[prop.Value]; !exists {
+			v.err = fmt.Errorf("unknown input %q", prop.Value)
+			return
 		}
-
-		expression = strings.TrimSpace(expression)
-		if value, ok := values[expression]; ok {
-			result.WriteString(value)
-			i = end + 1
-			continue
+		v.dependencies[prop.Value] = true
+	case *ast.CallNode:
+		name, ok := n.Callee.(*ast.IdentifierNode)
+		if !ok || !helperName(name.Value) {
+			v.err = fmt.Errorf("only documented pure helper calls are supported")
 		}
-
-		out, err := EvalString(expression, values)
-		if err != nil {
-			return "", fmt.Errorf("interpolation %s: %w", input[i:end+1], err)
+	case *ast.IdentifierNode:
+		if n.Value != "inputs" && !helperName(n.Value) {
+			v.err = fmt.Errorf("unknown name %q; use inputs.name", n.Value)
 		}
-		result.WriteString(out)
-		i = end + 1
-	}
-	return result.String(), nil
-}
-
-func NormalizeCommandWhitespace(command string) string {
-	var result strings.Builder
-	inSingleQuote := false
-	inDoubleQuote := false
-	escaped := false
-	wroteSpace := false
-
-	for _, r := range command {
-		if escaped {
-			result.WriteRune(r)
-			escaped = false
-			wroteSpace = false
-			continue
-		}
-
-		if r == '\\' {
-			result.WriteRune(r)
-			escaped = true
-			wroteSpace = false
-			continue
-		}
-
-		switch r {
-		case '\'':
-			if !inDoubleQuote {
-				inSingleQuote = !inSingleQuote
-			}
-			result.WriteRune(r)
-			wroteSpace = false
-		case '"':
-			if !inSingleQuote {
-				inDoubleQuote = !inDoubleQuote
-			}
-			result.WriteRune(r)
-			wroteSpace = false
+	case *ast.BinaryNode:
+		switch n.Operator {
+		case "+", "==", "!=", "and", "or", "&&", "||", "<", "<=", ">", ">=":
 		default:
-			if unicode.IsSpace(r) && !inSingleQuote && !inDoubleQuote {
-				if result.Len() > 0 && !wroteSpace {
-					result.WriteByte(' ')
-					wroteSpace = true
-				}
-				continue
-			}
-			result.WriteRune(r)
-			wroteSpace = false
+			v.err = fmt.Errorf("unsupported operator %q", n.Operator)
 		}
+	case *ast.UnaryNode:
+		if n.Operator != "!" && n.Operator != "not" {
+			v.err = fmt.Errorf("unsupported operator %q", n.Operator)
+		}
+	case *ast.StringNode, *ast.BoolNode, *ast.NilNode, *ast.ConditionalNode, *ast.ArrayNode:
+	default:
+		v.err = fmt.Errorf("unsupported expression construct %T", n)
 	}
-	return strings.TrimSpace(result.String())
 }
-
-func ResolveComputed(computed map[string]ComputedValue, values map[string]string) (map[string]string, error) {
-	resolved := make(map[string]string, len(computed))
-	ctx := make(map[string]string, len(values)+len(computed))
-	for k, v := range values {
-		ctx[k] = v
+func helperName(name string) bool {
+	switch name {
+	case "quote", "flag", "boolFlag", "repeatFlag", "join", "default", "empty":
+		return true
 	}
-
-	names := make([]string, 0, len(computed))
-	for name := range computed {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		item := computed[name]
-		value, err := resolveComputedValue(name, item, ctx)
-		if err != nil {
-			return nil, err
-		}
-		resolved[name] = value
-		ctx[name] = value
-	}
-
-	return resolved, nil
+	return false
 }
-
-func resolveComputedValue(name string, item ComputedValue, values map[string]string) (string, error) {
-	if len(item.Cases) == 0 {
-		value, err := EvalString(item.Value, values)
-		if err != nil {
-			return "", fmt.Errorf("computed %s value: %w", name, err)
-		}
-		return value, nil
-	}
-
-	defaultIndex := -1
-	for i, computedCase := range item.Cases {
-		if computedCase.Default {
-			if defaultIndex == -1 {
-				defaultIndex = i
-			}
-			continue
-		}
-
-		matched, err := EvalBool(computedCase.When, values)
-		if err != nil {
-			return "", fmt.Errorf("computed %s case %d when: %w", name, i, err)
-		}
-		if matched {
-			value, err := Interpolate(computedCase.Value, values)
-			if err != nil {
-				return "", fmt.Errorf("computed %s case %d value: %w", name, i, err)
-			}
-			return value, nil
-		}
-	}
-
-	if defaultIndex != -1 {
-		value, err := Interpolate(item.Cases[defaultIndex].Value, values)
-		if err != nil {
-			return "", fmt.Errorf("computed %s case %d value: %w", name, defaultIndex, err)
-		}
-		return value, nil
-	}
-
-	return "", nil
+func expressionEnv(inputs map[string]any) map[string]any {
+	return map[string]any{"inputs": inputs, "quote": quote, "flag": flag, "boolFlag": boolFlag, "repeatFlag": expressionRepeatFlag, "join": expressionJoin, "default": defaultValue, "empty": empty}
 }
-
-func scanInterpolationExpression(input string, start int) (string, int, bool) {
-	inSingleQuote := false
-	inDoubleQuote := false
-	escaped := false
-	depth := 0
-
-	for i := start; i < len(input); i++ {
-		c := input[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		if c == '\\' {
-			escaped = true
-			continue
-		}
-		if c == '\'' && !inDoubleQuote {
-			inSingleQuote = !inSingleQuote
-			continue
-		}
-		if c == '"' && !inSingleQuote {
-			inDoubleQuote = !inDoubleQuote
-			continue
-		}
-		if inSingleQuote || inDoubleQuote {
-			continue
-		}
-
-		switch c {
-		case '(', '[', '{':
-			depth++
-		case ')', ']':
-			if depth > 0 {
-				depth--
-			}
-		case '}':
-			if depth == 0 {
-				return input[start:i], i, true
-			}
-			depth--
-		}
+func compileExpression(source string, names map[string]models.Input, boolean bool) (*vm.Program, []string, error) {
+	if len(source) > 4096 {
+		return nil, nil, fmt.Errorf("expression exceeds 4 KiB")
 	}
-	return "", 0, false
-}
-
-func eval(expression string, values map[string]string) (any, error) {
-	env := make(map[string]any, len(values)+7)
-	for k, v := range values {
-		env[k] = v
-	}
-	env["flag"] = flag
-	env["boolFlag"] = boolFlag
-	env["repeatFlag"] = repeatFlag
-	env["quote"] = quote
-	env["join"] = joinNonEmpty
-	env["default"] = defaultValue
-	env["empty"] = empty
-
-	program, err := expr.Compile(expression, expr.Env(env))
+	parseConfig := conf.CreateNew()
+	expr.DisableAllBuiltins()(parseConfig)
+	parseConfig.MaxNodes = 1000
+	tree, err := parser.ParseWithConfig(source, parseConfig)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return expr.Run(program, env)
+	visitor := &expressionCheck{names: names, dependencies: map[string]bool{}}
+	ast.Walk(&tree.Node, visitor)
+	if visitor.err != nil {
+		return nil, nil, visitor.err
+	}
+	kind, err := expressionType(tree.Node, names)
+	if err != nil {
+		return nil, nil, err
+	}
+	expected := "string"
+	if boolean {
+		expected = "boolean"
+	}
+	if kind != expected {
+		return nil, nil, fmt.Errorf("expression must return %s, got %s", expected, kind)
+	}
+	samples := map[string]any{}
+	for name, in := range names {
+		samples[name] = in.Zero()
+	}
+	opts := []expr.Option{expr.Env(expressionEnv(samples)), expr.DisableAllBuiltins(), expr.MaxNodes(1000)}
+	if boolean {
+		opts = append(opts, expr.AsBool())
+	} else {
+		opts = append(opts, expr.AsKind(reflect.String))
+	}
+	program, err := expr.Compile(source, opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	dependencies := []string{}
+	for name := range visitor.dependencies {
+		dependencies = append(dependencies, name)
+	}
+	return program, dependencies, nil
 }

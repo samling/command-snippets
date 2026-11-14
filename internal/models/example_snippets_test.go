@@ -1,218 +1,95 @@
-package models
+package models_test
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/samling/command-snippets/internal/library"
+	"github.com/samling/command-snippets/internal/models"
 )
 
-func TestKubernetesConditionalNamespaceExample(t *testing.T) {
-	path := filepath.Join("..", "..", "snippets", "kubernetes.yaml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read kubernetes snippets: %v", err)
-	}
-
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		t.Fatalf("parse kubernetes snippets: %v", err)
-	}
-
-	snippet, ok := cfg.Snippets["kubectl-get-pods-conditional-namespace"]
-	if !ok {
-		t.Fatal("expected conditional namespace example snippet")
-	}
-
-	if snippet.Command != "kubectl get pods ${namespace_arg}" {
-		t.Fatalf("unexpected command %q", snippet.Command)
-	}
-	if len(snippet.Variables) != 2 {
-		t.Fatalf("got %d variables, want 2", len(snippet.Variables))
-	}
-	if snippet.Variables[0].Name != "namespace_mode" {
-		t.Fatalf("first variable = %q, want namespace_mode", snippet.Variables[0].Name)
-	}
-	if snippet.Variables[1].Name != "namespace" {
-		t.Fatalf("second variable = %q, want namespace", snippet.Variables[1].Name)
-	}
-	if snippet.Variables[1].VisibleIf != `namespace_mode == "named"` {
-		t.Fatalf("visible_if = %q", snippet.Variables[1].VisibleIf)
-	}
-	if snippet.Variables[1].RequiredIf != `namespace_mode == "named"` {
-		t.Fatalf("required_if = %q", snippet.Variables[1].RequiredIf)
-	}
-	if _, ok := snippet.Computed["namespace_arg"]; !ok {
-		t.Fatal("expected namespace_arg computed value")
-	}
-
-	result, err := snippet.ProcessTemplate(map[string]string{"namespace_mode": "named", "namespace": "default"}, nil)
-	if err != nil {
-		t.Fatalf("named namespace render failed: %v", err)
-	}
-	if result != "kubectl get pods -n default" {
-		t.Fatalf("named namespace result = %q", result)
-	}
-
-	result, err = snippet.ProcessTemplate(map[string]string{"namespace_mode": "all"}, nil)
-	if err != nil {
-		t.Fatalf("all namespace render failed: %v", err)
-	}
-	if result != "kubectl get pods -A" {
-		t.Fatalf("all namespace result = %q", result)
-	}
-}
-
-func TestShippedSnippetsUseCurrentTemplateStyle(t *testing.T) {
+func TestShippedCanonicalExamplesValidateAndRenderPodGolden(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("..", "..", "snippets", "*.yaml"))
 	if err != nil {
-		t.Fatalf("glob shipped snippets: %v", err)
+		t.Fatal(err)
 	}
-	if len(paths) == 0 {
-		t.Fatal("expected shipped snippet files")
+	type renderCase struct {
+		values map[string]any
+		want   string
 	}
-
+	cases := map[string]renderCase{
+		"Run a container with options":   {map[string]any{"detach": true, "env": []string{"A=1", "B=hello world"}, "name": "web app"}, "docker run -d -e A=1 -e 'B=hello world' --name 'web app' nginx:latest"},
+		"Follow container logs":          {map[string]any{"container": "web"}, "docker logs -f web --tail 100"},
+		"Git status":                     {nil, "git status --short"},
+		"Commit staged changes":          {map[string]any{"message": "Fix pods"}, "git commit -m 'Fix pods'"},
+		"Find commits by message":        {map[string]any{"pattern": "fix.*"}, "git log --oneline --grep 'fix.*'"},
+		"Find text in files":             {map[string]any{"pattern": "pod.*"}, "grep -r -E 'pod.*' ."},
+		"List directory sizes":           {nil, "du -h --max-depth=1 . | sort -h"},
+		"List pods":                      {map[string]any{"namespace": "all"}, "kubectl get pods -A"},
+		"Get pods in a chosen namespace": {map[string]any{"mode": "Named", "namespace": "team-a"}, "kubectl get pods  -n team-a"},
+		"Forward a service port":         {map[string]any{"service": "web"}, "kubectl port-forward 'svc/web' '8080:8080' "},
+		"Search with an optional limit":  {map[string]any{"pattern": "pod.*", "limit": "10"}, "grep -E 'pod.*' . -m 10"},
+		"Echo a literal shell variable":  {nil, `echo '${HOME}' "$HOME" '{{example}}'`},
+	}
+	ids := map[string]bool{}
 	for _, path := range paths {
-		t.Run(filepath.Base(path), func(t *testing.T) {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
+		path, err = filepath.Abs(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lib := library.Load(path, t.TempDir())
+		if err := lib.Error(); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		for _, entry := range lib.Entries {
+			if !models.ValidID(entry.Snippet.ID) || ids[entry.Snippet.ID] {
+				t.Fatalf("missing, invalid or duplicate bundled identity: %s", entry.Snippet.Name)
 			}
-
-			var cfg Config
-			if err := yaml.Unmarshal(data, &cfg); err != nil {
-				t.Fatalf("parse %s: %v", path, err)
+			ids[entry.Snippet.ID] = true
+			if entry.Snippet.Name != "Pod resource usage, sorted" {
+				tc, ok := cases[entry.Snippet.Name]
+				if !ok {
+					t.Fatalf("bundled example lacks representative render case: %s", entry.Snippet.Name)
+				}
+				command, err := entry.Template.Render(tc.values)
+				if err != nil || command != tc.want {
+					t.Fatalf("%s: got %q want %q: %v", entry.Snippet.Name, command, tc.want, err)
+				}
+				delete(cases, entry.Snippet.Name)
 			}
-			if len(cfg.TransformTemplates) > 0 {
-				t.Fatalf("%s defines transform_templates; shipped examples should use current computed syntax", path)
-			}
-
-			for snippetName, snippet := range cfg.Snippets {
-				for _, variable := range snippet.Variables {
-					if variable.TransformTemplate != "" {
-						t.Fatalf("%s/%s variable %s uses transform_template", path, snippetName, variable.Name)
+			if entry.Snippet.Name == "Pod resource usage, sorted" {
+				if len(entry.Snippet.Expressions) != 0 {
+					t.Fatal("pod example requires expressions")
+				}
+				for _, tc := range []struct{ namespace, sort, key, golden string }{{"", "CPU", "3", "pods-current-cpu.txt"}, {"team-a", "Memory", "4", "pods-named-memory.txt"}, {"all", "Memory", "4", "pods-all-memory.txt"}} {
+					command, err := entry.Template.Render(map[string]any{"namespace": tc.namespace, "sort_by": tc.sort})
+					if err != nil {
+						t.Fatal(err)
 					}
-					if variable.Transform != nil {
-						t.Fatalf("%s/%s variable %s uses legacy transform", path, snippetName, variable.Name)
+					if !strings.Contains(command, "sort -k"+tc.key+","+tc.key) || !strings.Contains(command, `print "-", $0`) || !strings.Contains(command, `"$header"`) {
+						t.Fatalf("pod golden %q", command)
 					}
-					if variable.Computed {
-						t.Fatalf("%s/%s variable %s uses legacy computed variable", path, snippetName, variable.Name)
+					golden, err := os.ReadFile(filepath.Join("..", "..", "testdata", "golden", tc.golden))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if command != string(golden) {
+						t.Fatalf("%s: got %q want %q", tc.golden, command, golden)
+					}
+					before, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !strings.Contains(string(before), "{{sort_by}}") {
+						t.Fatal("render changed example")
 					}
 				}
 			}
-		})
-	}
-}
-
-func TestShippedCurrentStyleSnippetRendering(t *testing.T) {
-	cfg := loadShippedSnippetConfig(t)
-
-	tests := []struct {
-		name    string
-		snippet string
-		values  map[string]string
-		want    string
-	}{
-		{
-			name:    "kubernetes namespace mode",
-			snippet: "kubectl-get-pods",
-			values:  map[string]string{"namespace_mode": "named", "namespace": "default"},
-			want:    "kubectl get pods -n default",
-		},
-		{
-			name:    "docker optional flags",
-			snippet: "docker-ps",
-			values:  map[string]string{"show_all": "true", "filter": "name=myapp"},
-			want:    "docker ps -a --filter name=myapp",
-		},
-		{
-			name:    "docker advanced repeats env flag",
-			snippet: "docker-run-advanced",
-			values:  map[string]string{"image_name": "nginx", "env_var": "TEST=TEST FOO=BAR"},
-			want:    "docker run -e TEST=TEST -e FOO=BAR nginx",
-		},
-		{
-			name:    "git computed message flag",
-			snippet: "git-commit-amend",
-			values:  map[string]string{"no_edit": "false", "new_message": "fix bug"},
-			want:    "git commit --amend -m 'fix bug'",
-		},
-		{
-			name:    "gnu sed global flag",
-			snippet: "sed-replace",
-			values:  map[string]string{"search_pattern": "foo", "replacement": "bar", "global": "true", "file": "app.txt"},
-			want:    "sed -E 's/foo/bar/g' app.txt",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			snippet, ok := cfg.Snippets[tt.snippet]
-			if !ok {
-				t.Fatalf("snippet %q not found", tt.snippet)
-			}
-			got, err := snippet.ProcessTemplate(tt.values, cfg)
-			if err != nil {
-				t.Fatalf("ProcessTemplate failed: %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDockerRunAdvancedAllowsRepeatedEnvVars(t *testing.T) {
-	cfg := loadShippedSnippetConfig(t)
-	snippet, ok := cfg.Snippets["docker-run-advanced"]
-	if !ok {
-		t.Fatal("snippet docker-run-advanced not found")
-	}
-
-	for _, variable := range snippet.Variables {
-		if variable.Name != "env_var" {
-			continue
-		}
-		if err := variable.ValidateWithConfig("test=test foo=bar", cfg); err != nil {
-			t.Fatalf("env_var validation rejected repeated env vars: %v", err)
-		}
-		return
-	}
-
-	t.Fatal("env_var variable not found")
-}
-
-func loadShippedSnippetConfig(t *testing.T) *Config {
-	t.Helper()
-
-	cfg := &Config{
-		Snippets:           make(map[string]Snippet),
-		VariableTypes:      make(map[string]VariableType),
-		TransformTemplates: make(map[string]TransformTemplate),
-	}
-	paths, err := filepath.Glob(filepath.Join("..", "..", "snippets", "*.yaml"))
-	if err != nil {
-		t.Fatalf("glob shipped snippets: %v", err)
-	}
-	for _, path := range paths {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		var partial Config
-		if err := yaml.Unmarshal(data, &partial); err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		for name, snippet := range partial.Snippets {
-			cfg.Snippets[name] = snippet
-		}
-		for name, variableType := range partial.VariableTypes {
-			cfg.VariableTypes[name] = variableType
-		}
-		for name, transformTemplate := range partial.TransformTemplates {
-			cfg.TransformTemplates[name] = transformTemplate
 		}
 	}
-	return cfg
+	if len(cases) != 0 {
+		t.Fatalf("render cases reference missing examples: %v", cases)
+	}
 }

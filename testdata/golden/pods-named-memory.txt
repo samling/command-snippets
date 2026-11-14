@@ -1,0 +1,3 @@
+kubectl top pods -n team-a --no-headers |
+  awk 'NF == 3 {print "-", $0; next} {print}' |
+  { header='NAMESPACE NAME CPU MEMORY'; printf '%s\n' "$header"; sort -k4,4 -h -r; }
